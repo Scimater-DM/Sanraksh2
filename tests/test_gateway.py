@@ -1,9 +1,11 @@
 import base64
+import csv
 import io
 import json
 import hashlib
 import os
 import threading
+import tempfile
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
@@ -17,6 +19,10 @@ from docx import Document as WordDocument
 class GatewayInspectionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.data_directory = tempfile.TemporaryDirectory()
+        gateway.DATA_STORE = gateway.GatewayDataStore(
+            Path(cls.data_directory.name) / "sanraksh-tests.sqlite3"
+        )
         cls.cases = json.loads(
             (Path(__file__).parent.parent / "benchmarks" / "prompts.json").read_text()
         )
@@ -30,6 +36,7 @@ class GatewayInspectionTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.server_thread.join(timeout=2)
+        cls.data_directory.cleanup()
 
     def request(self, path, data=None, user="ananya", extra_headers=None, method=None):
         body = json.dumps(data).encode() if data is not None else None
@@ -60,6 +67,73 @@ class GatewayInspectionTests(unittest.TestCase):
         self.assertGreaterEqual(len(self.cases), 30)
         self.assertTrue(any(case["expected"] is None for case in self.cases))
         self.assertTrue(any(case["expected"] is not None for case in self.cases))
+
+    def test_benchmark_csv_download_includes_labeled_cases_and_stress_notes(self):
+        request = Request(self.base_url + "/api/benchmark.csv", headers={"X-Demo-User": "ananya"})
+        with urlopen(request) as response:
+            self.assertEqual(response.headers.get_content_type(), "text/csv")
+            self.assertIn("attachment", response.headers.get("Content-Disposition", ""))
+            rows = list(csv.DictReader(io.StringIO(response.read().decode("utf-8-sig"))))
+        self.assertEqual(len(rows), len(self.cases))
+        self.assertEqual(rows[0]["expected_categories"], "aadhaar")
+        self.assertIn("legitimate", {row["classification"] for row in rows})
+        self.assertIn("adversarial", {row["classification"] for row in rows})
+        stress_rows = [row for row in rows if row["stress_test"] == "yes"]
+        self.assertTrue(stress_rows)
+        self.assertTrue(all(row["note"] for row in stress_rows))
+
+    def test_benchmark_run_is_saved_and_results_csv_exports_detected_cases(self):
+        status, run = self.request("/api/benchmark/run", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(len(run["results"]), len(self.cases))
+        self.assertIn("run_id", run)
+
+        request = Request(
+            self.base_url + "/api/benchmark-results.csv",
+            headers={"X-Demo-User": "ananya"},
+        )
+        with urlopen(request) as response:
+            self.assertEqual(response.headers.get_content_type(), "text/csv")
+            rows = list(csv.DictReader(io.StringIO(response.read().decode("utf-8-sig"))))
+        self.assertEqual(len(rows), len(self.cases))
+        self.assertTrue(all(row["run_id"] == run["run_id"] for row in rows))
+        self.assertTrue({"yes", "no"} & {row["correct"] for row in rows})
+        self.assertIn("sanitized_prompt", rows[0])
+
+        status, isolated_rows = self.request("/api/state", user="rohan")
+        self.assertEqual(status, 200)
+        self.assertEqual(isolated_rows["prompts"], [])
+
+    def test_inspected_prompt_history_persists_only_redacted_prompt_data(self):
+        original_prompt = "My Aadhaar is 234567890123."
+        status, result = self.request("/api/chat", {"text": original_prompt})
+        self.assertEqual(status, 200)
+        self.assertEqual(result["status"], "delivered")
+
+        status, state = self.request("/api/state")
+        self.assertEqual(status, 200)
+        record = next(
+            prompt for prompt in state["prompts"]
+            if "[REDACTED SENSITIVE DATA]" in prompt["prompt"]
+        )
+        self.assertNotIn("234567890123", record["prompt"])
+        reopened_store = gateway.GatewayDataStore(gateway.DATA_STORE.path)
+        self.assertEqual(
+            reopened_store.prompts_for("ananya")[0]["prompt"],
+            record["prompt"],
+        )
+
+        request = Request(
+            self.base_url + "/api/prompts.csv",
+            headers={"X-Demo-User": "ananya"},
+        )
+        with urlopen(request) as response:
+            rows = list(csv.DictReader(io.StringIO(response.read().decode("utf-8-sig"))))
+        row = next(
+            prompt for prompt in rows
+            if "[REDACTED SENSITIVE DATA]" in prompt["sanitized_prompt"]
+        )
+        self.assertNotIn("234567890123", row["sanitized_prompt"])
 
     def test_unknown_demo_identity_receives_forbidden_response(self):
         status, result = self.request("/api/state", user="stale-user")
@@ -753,11 +827,12 @@ class GatewayInspectionTests(unittest.TestCase):
         self.assertIn("prompt_injection", result["findings"])
         model.assert_not_called()
 
-    def test_audit_events_do_not_store_prompt_content(self):
+    def test_audit_events_remain_content_free_while_prompt_history_is_stored(self):
         secret_prompt = "Do not retain this unique private text phrase."
         self.request("/api/chat", {"text": secret_prompt})
         _, state = self.request("/api/state")
-        self.assertNotIn(secret_prompt, json.dumps(state))
+        self.assertNotIn(secret_prompt, json.dumps(state["events"]))
+        self.assertIn(secret_prompt, [record["prompt"] for record in state["prompts"]])
 
     def test_live_benchmark_endpoint_serves_the_test_set(self):
         status, result = self.request("/api/benchmark")
