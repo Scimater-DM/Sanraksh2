@@ -181,6 +181,12 @@ textarea::placeholder,input::placeholder{color:#62727d}
 .upload-checklist span{display:grid;gap:2px}
 .upload-checklist strong{color:#b3c1c6;font-size:8px;font-weight:600}
 .upload-checklist small{color:#7d8f96;font-size:8px;line-height:1.4}
+.knowledge-governance{display:flex;gap:10px;margin-top:12px;padding:11px;border:1px solid #35433c;border-radius:5px;background:linear-gradient(120deg,#1b211d,#171e22)}
+.knowledge-governance-icon{flex:none;display:grid;place-items:center;width:23px;height:23px;border:1px solid #48634f;border-radius:7px;background:#202d23;color:#a8d5a6;font-size:12px}
+.knowledge-governance>div:last-child{min-width:0}
+.knowledge-governance strong{display:block;color:#c0cec6;font-size:8px;font-weight:600;line-height:1.45}
+.knowledge-governance p{margin:4px 0;color:#92a29a;font-size:8px;line-height:1.5}
+.knowledge-governance small{display:block;color:#778982;font-size:8px;line-height:1.5}
 .company-ai-flow{margin-top:16px;padding:12px;border:1px solid #293b43;border-radius:6px;background:#111b21}
 .company-ai-steps{display:grid;grid-template-columns:minmax(0,1fr) 16px minmax(0,1fr) 16px minmax(0,1fr) 16px minmax(0,1fr);align-items:center;gap:8px;margin-top:10px}
 .company-ai-steps>span{display:flex;align-items:center;gap:7px;color:#aab9bf;font-size:9px;line-height:1.4}
