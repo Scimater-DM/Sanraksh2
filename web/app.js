@@ -134,6 +134,7 @@ const CATEGORY_COLORS = {
 let currentState = null;
 let currentUser = localStorage.getItem("sanraksh-demo-user") || "ananya";
 let publicSignupEnabled = false;
+let hostedPublicDemo = false;
 let hostedAuthRequired = false;
 let benchmarkCases = null;
 let gameRound = 0;
@@ -170,9 +171,12 @@ function showLogin(message = "") {
   document.getElementById("public-mode-status").textContent = message || (
     publicSignupEnabled
       ? "Personal sign-up is local-only in this demo; accounts reset when the server restarts."
+      : hostedPublicDemo
+        ? "Try a temporary personal demo account. Account data is isolated per visit and cleared when the server restarts; sign-up is disabled."
       : "Hosted personal sign-up is disabled until durable account storage is configured."
   );
-  document.getElementById("public-mode-button").disabled = !publicSignupEnabled;
+  document.getElementById("public-mode-button").disabled =
+    !(publicSignupEnabled || hostedPublicDemo);
 }
 
 function showLoginPanel(id) {
@@ -208,7 +212,8 @@ function render(state) {
     document.getElementById("identity-picker").classList.remove("hidden");
     document.getElementById("secure-identity").classList.add("hidden");
     document.getElementById("logout-button").classList.add("hidden");
-    document.getElementById("environment-label").textContent = "LOCAL DEMO";
+    document.getElementById("environment-label").textContent = state.public_demo
+      ? "PUBLIC DEMO" : "LOCAL DEMO";
     const select = document.getElementById("identity-select");
     select.innerHTML = Object.entries(users).map(([id, user]) =>
       `<option value="${escapeHTML(id)}">${escapeHTML(user.name)} · ${escapeHTML(user.role)}</option>`
@@ -226,30 +231,30 @@ function render(state) {
   const heroTitle = document.querySelector(".hero-banner h2");
   const heroCopy = document.querySelector(".hero-banner p");
   if (personalMode) {
-    heading.textContent = "Your personal protection";
-    headingCopy.textContent = "Check prompts and private files before they reach your chosen AI model.";
-    heroTitle.innerHTML = 'Your AI, <span>with a safety check.</span>';
-    heroCopy.textContent = "Scan personal information, credentials, and hidden instructions before sending a prompt or private attachment.";
-    heroMeta.innerHTML = '<span class="hero-check">✓</span> Personal data scan <b>·</b> <span class="hero-check">✓</span> Private file inspection <b>·</b> <span class="hero-check">✓</span> Account-isolated history';
-    gatewayCopy.textContent = "Your message and optional private file are inspected first, then sent to this gateway's configured AI model; its provider's privacy and retention terms still apply.";
-    auditCopy.textContent = "Only your account's metadata is shown; prompt bodies, matched values, and model responses are not retained.";
+    heading.textContent = "Personal protection";
+    headingCopy.textContent = "Check prompts and private files before model dispatch.";
+    heroTitle.innerHTML = 'Your AI. <span>Your data protected.</span>';
+    heroCopy.textContent = "Detect personal data, credentials, and prompt attacks; apply your chosen policy before dispatch.";
+    heroMeta.innerHTML = '<span class="hero-check">✓</span> Personal data <b>·</b> <span class="hero-check">✓</span> Credential scan <b>·</b> <span class="hero-check">✓</span> Private file inspection';
+    gatewayCopy.textContent = "Try a prompt or private attachment to see the policy decision before model dispatch.";
+    auditCopy.textContent = "Only your account's metadata is shown. Sanitized prompt text is stored separately in prompt history.";
     privacyNote.lastChild.textContent = " Inspected content is sent to this gateway's configured AI model";
-    attachmentNote.textContent = "Files are scanned before the configured model receives them and are not added to a company library. Direct uploads to ChatGPT bypass Sanraksh.";
+    attachmentNote.textContent = "Private files are inspected before model use and are not added to a shared library.";
     document.getElementById("policy-status").textContent =
       "Choose an action for each category. These settings affect only your personal account.";
     document.querySelector("#policies h2").textContent = "Personal protection settings";
     document.querySelector("#policies .panel-heading p").textContent =
       "These controls apply only to your personal account.";
   } else {
-    heading.textContent = "Security overview";
-    headingCopy.textContent = "Protect employee and citizen data before it reaches an AI model.";
-    heroTitle.innerHTML = 'Catch the leak <span>before it leaves.</span>';
-    heroCopy.textContent = "Catch accidental disclosures, prompt injection, and unauthorized document access before model dispatch.";
-    heroMeta.innerHTML = '<span class="hero-check">✓</span> Aadhaar · PAN · UPI <b>·</b> <span class="hero-check">✓</span> Permission-aware retrieval <b>·</b> <span class="hero-check">✓</span> Content-free audit';
-    gatewayCopy.textContent = "Run a request through the same controls used by the gateway.";
-    auditCopy.textContent = "Metadata only—no prompt bodies, matched values, or model responses are retained.";
+    heading.textContent = "Live protection";
+    headingCopy.textContent = "Inspect prompts, enforce document access, and check responses before AI use.";
+    heroTitle.innerHTML = 'Useful AI. <span>Safer data.</span>';
+    heroCopy.textContent = "Sensitive data is masked or blocked, document access is checked, and model responses are screened.";
+    heroMeta.innerHTML = '<span class="hero-check">✓</span> Personal data <b>·</b> <span class="hero-check">✓</span> Prompt attacks <b>·</b> <span class="hero-check">✓</span> Restricted documents';
+    gatewayCopy.textContent = "Choose a scenario or enter a prompt to see detection, policy action, and model outcome.";
+    auditCopy.textContent = "Audit events stay metadata-only. Sanitized prompt text is stored separately in prompt history.";
     privacyNote.lastChild.textContent = " Content is not retained in gateway logs";
-    attachmentNote.textContent = "Use Inspect & send—direct uploads to ChatGPT bypass Sanraksh. Files are scanned first, kept out of shared documents and disk; approval holds may remain in server memory.";
+    attachmentNote.textContent = "Private files are inspected before use and are not added to the shared document library.";
     document.getElementById("policy-status").textContent =
       "Select a profile to update all controls together, then review each rule below.";
     document.querySelector("#policies h2").textContent = "Policy controls";
@@ -257,6 +262,13 @@ function render(state) {
       "Choose what happens when a category is detected. Changes take effect immediately.";
   }
   const events = state.events || [];
+  const hasDemoEvents = state.demo_data === true;
+  document.querySelector(".signals-panel .panel-heading p").textContent = hasDemoEvents
+    ? "Synthetic presentation examples are included; DEMO rows are not live incidents."
+    : "Flagged categories from this session.";
+  document.querySelector("#audit .panel-heading p").textContent = hasDemoEvents
+    ? "Synthetic examples are marked DEMO. Audit events contain metadata only; sanitized prompts are listed separately below."
+    : "Audit events contain metadata only; sanitized prompts are listed separately below.";
   const blocked = events.filter(event =>
     event.action === "block" || /blocked|denied|withheld/i.test(event.outcome)
   ).length;
@@ -273,6 +285,7 @@ function render(state) {
   renderCategories(state.categories || {});
   renderPolicies(state.policies || {});
   renderAudit(events);
+  renderPromptHistory(state.prompts || []);
   renderApprovals(state.approvals || [], account.role);
   loadDocuments();
 }
@@ -361,13 +374,39 @@ function renderAudit(events) {
     const blocked = action === "block" || /blocked|denied|withheld/i.test(event.outcome);
     const timestamp = new Date(event.time).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
     return `<tr>
-      <td class="event-id">EVT-${escapeHTML(event.id.slice(0, 6).toUpperCase())}</td>
+      <td class="event-id">EVT-${escapeHTML(event.id.slice(0, 6).toUpperCase())}${event.demo ? ' <span class="demo-event-label">DEMO</span>' : ""}</td>
       <td>${escapeHTML(event.user)} <span class="muted">· ${escapeHTML(event.role)}</span></td>
       <td>${categories}</td>
       <td><span class="action-label ${escapeHTML(action)}">${escapeHTML(action)}</span></td>
       <td><i class="outcome-dot ${blocked ? "block" : ""}"></i>${escapeHTML(event.outcome)}</td>
       <td class="muted">${escapeHTML(timestamp)}</td>
     </tr>`;
+  }).join("");
+}
+
+function renderPromptHistory(prompts) {
+  const container = document.getElementById("prompt-history-list");
+  if (!prompts.length) {
+    container.innerHTML = '<p class="empty-prompts">Prompts you inspect will appear here with their policy outcome.</p>';
+    return;
+  }
+  container.innerHTML = prompts.map(record => {
+    const categories = record.categories?.length
+      ? record.categories.map(labelShort).join(", ") : "No findings";
+    const timestamp = new Date(record.time).toLocaleString([], {
+      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+    });
+    return `<article class="prompt-record">
+      <div class="prompt-record-main">
+        <time datetime="${escapeHTML(record.time)}">${escapeHTML(timestamp)}</time>
+        <p>${escapeHTML(record.prompt)}</p>
+      </div>
+      <div class="prompt-record-meta">
+        <span>${escapeHTML(categories)}</span>
+        <strong class="action-label ${escapeHTML(record.action)}">${escapeHTML(record.action)}</strong>
+        <span>${escapeHTML(record.outcome)}</span>
+      </div>
+    </article>`;
   }).join("");
 }
 
@@ -578,12 +617,18 @@ async function runBenchmark() {
   const output = document.getElementById("benchmark-copy");
   button.disabled = true;
   button.textContent = "Running…";
-  output.textContent = "Inspecting the benchmark cases…";
+  output.textContent = "Running the benchmark against live gateway rules…";
   try {
-    if (!benchmarkCases) {
-      const response = await api("/api/benchmark");
-      benchmarkCases = response.cases;
-    }
+    const run = await api("/api/benchmark/run", {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+    benchmarkCases = run.results.map(result => ({
+      text: result.prompt,
+      expected: result.expected_categories,
+      stress: result.stress_test,
+      note: result.note
+    }));
     let correct = 0;
     let truePositive = 0;
     let falsePositive = 0;
@@ -592,11 +637,11 @@ async function runBenchmark() {
       category, {truePositive: 0, falsePositive: 0, falseNegative: 0}
     ]));
     const evaluatedCases = [];
-    for (const item of benchmarkCases) {
-      const result = await api("/api/inspect", {method: "POST", body: JSON.stringify({text: item.text})});
-      const categories = new Set(result.findings.map(finding => finding.category));
-      const expected = item.expected === null ? [] :
-        (Array.isArray(item.expected) ? item.expected : [item.expected]);
+    for (let index = 0; index < benchmarkCases.length; index++) {
+      const item = benchmarkCases[index];
+      const result = run.results[index];
+      const categories = new Set(result.detected_categories);
+      const expected = item.expected;
       const expectedSet = new Set(expected);
       for (const category of Object.keys(categoryStats)) {
         if (expectedSet.has(category) && categories.has(category)) categoryStats[category].truePositive++;
@@ -627,8 +672,8 @@ async function runBenchmark() {
     const categoryErrorRate = Math.round(1000 * (falsePositive + falseNegative) / decisions) / 10;
     document.getElementById("benchmark-accuracy").textContent = `${accuracy}%`;
     document.getElementById("benchmark-progress").style.width = `${accuracy}%`;
-    output.textContent = `${correct}/${benchmarkCases.length} prompts classified correctly · ${precision.toFixed(1)}% precision · ${recall.toFixed(1)}% recall · ${evaluatedCases.filter(({expected, found}) => expected.length !== found.length || expected.some(category => !found.includes(category))).length} misclassified prompts.`;
-    const adversarial = benchmarkCases.filter(item => item.expected !== null).length;
+    output.textContent = `${correct}/${benchmarkCases.length} prompts classified correctly · ${precision.toFixed(1)}% precision · ${recall.toFixed(1)}% recall · ${evaluatedCases.filter(({expected, found}) => expected.length !== found.length || expected.some(category => !found.includes(category))).length} misclassified. Run saved; use Run results CSV to export it.`;
+    const adversarial = benchmarkCases.filter(item => item.expected.length > 0).length;
     const legitimate = benchmarkCases.length - adversarial;
     document.getElementById("benchmark-count").textContent = `${benchmarkCases.length} prompts · ${adversarial} adversarial / ${legitimate} legitimate`;
     renderBenchmarkBreakdown(categoryStats, {
@@ -644,7 +689,7 @@ async function runBenchmark() {
     output.textContent = `Benchmark failed: ${error.message}`;
   } finally {
     button.disabled = false;
-    button.innerHTML = 'Run benchmark <span>→</span>';
+    button.innerHTML = 'Run tests <span>→</span>';
   }
 }
 
@@ -984,13 +1029,24 @@ async function init() {
     }
   });
   document.getElementById("public-mode-button").addEventListener("click", () => {
-    if (!publicSignupEnabled) {
+    if (!publicSignupEnabled && !hostedPublicDemo) {
       document.getElementById("public-mode-status").textContent =
         "Personal sign-up is disabled on this hosted deployment until durable account storage is configured.";
       return;
     }
     document.getElementById("personal-login-error").textContent = "";
     document.getElementById("personal-register-error").textContent = "";
+    document.getElementById("personal-login-form").classList.toggle("hidden", hostedPublicDemo);
+    document.getElementById("personal-register-form").classList.add("hidden");
+    document.getElementById("personal-account-tabs").classList.toggle("hidden", hostedPublicDemo);
+    document.getElementById("personal-signin-tab").classList.toggle("hidden", hostedPublicDemo);
+    document.getElementById("personal-register-tab").classList.toggle("hidden", hostedPublicDemo);
+    document.getElementById("personal-demo-entry").classList.remove("hidden");
+    document.getElementById("personal-account-title").textContent =
+      hostedPublicDemo ? "Explore personal protection" : "Your personal protection";
+    document.getElementById("personal-account-note").textContent = hostedPublicDemo
+      ? "A temporary personal demo account is created for this visit. Its settings and audit metadata are held in server memory and reset when the server restarts. Do not use real credentials or sensitive documents."
+      : "Demo accounts, settings, and audit metadata are temporary and held in server memory. Do not use real credentials or sensitive documents.";
     showLoginPanel("personal-account-card");
   });
   document.querySelectorAll("[data-back-to-modes]").forEach(button =>
@@ -1119,17 +1175,19 @@ async function init() {
     const health = await api("/api/health");
     hostedAuthRequired = health.auth_required === true;
     publicSignupEnabled = health.public_signup_enabled === true;
-    document.getElementById("public-mode-button").disabled = !publicSignupEnabled;
+    hostedPublicDemo = health.public_demo === true;
+    document.getElementById("public-mode-button").disabled =
+      !(publicSignupEnabled || hostedPublicDemo);
     document.getElementById("public-mode-status").textContent = publicSignupEnabled
       ? "Personal sign-up is local-only in this demo; accounts reset when the server restarts."
-      : "Hosted personal sign-up is disabled until durable account storage is configured.";
-    document.getElementById("personal-demo-entry").classList.toggle("hidden", !publicSignupEnabled);
+      : hostedPublicDemo
+        ? "Try a temporary personal demo account. Account data is isolated per visit and cleared when the server restarts; sign-up is disabled."
+        : "Hosted personal sign-up is disabled until durable account storage is configured.";
+    document.getElementById("personal-demo-entry").classList.toggle(
+      "hidden", !(publicSignupEnabled || hostedPublicDemo)
+    );
     await refresh();
-    if (currentState.mode === "personal" || (currentState.auth_required && currentState.current_user)) {
-      document.getElementById("login-overlay").classList.add("hidden");
-    } else {
-      showLogin();
-    }
+    showLogin();
   } catch (error) {
     if (error.status === 401) showLogin();
     else showError(error);

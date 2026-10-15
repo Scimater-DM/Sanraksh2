@@ -6,8 +6,6 @@ services:
     startCommand: python gateway.py
     healthCheckPath: /api/health
     envVars:
-      - key: GATEWAY_USERS_JSON
-        sync: false
       - key: LLM_BASE_URL
         value: https://api.openai.com/v1
       - key: LLM_MODEL

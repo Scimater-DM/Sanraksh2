@@ -1,8 +1,11 @@
 import base64
+import csv
 import io
 import json
 import hashlib
+import os
 import threading
+import tempfile
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
@@ -16,6 +19,10 @@ from docx import Document as WordDocument
 class GatewayInspectionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.data_directory = tempfile.TemporaryDirectory()
+        gateway.DATA_STORE = gateway.GatewayDataStore(
+            Path(cls.data_directory.name) / "sanraksh-tests.sqlite3"
+        )
         cls.cases = json.loads(
             (Path(__file__).parent.parent / "benchmarks" / "prompts.json").read_text()
         )
@@ -29,6 +36,7 @@ class GatewayInspectionTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.server_thread.join(timeout=2)
+        cls.data_directory.cleanup()
 
     def request(self, path, data=None, user="ananya", extra_headers=None, method=None):
         body = json.dumps(data).encode() if data is not None else None
@@ -60,10 +68,86 @@ class GatewayInspectionTests(unittest.TestCase):
         self.assertTrue(any(case["expected"] is None for case in self.cases))
         self.assertTrue(any(case["expected"] is not None for case in self.cases))
 
+    def test_benchmark_csv_download_includes_labeled_cases_and_stress_notes(self):
+        request = Request(self.base_url + "/api/benchmark.csv", headers={"X-Demo-User": "ananya"})
+        with urlopen(request) as response:
+            self.assertEqual(response.headers.get_content_type(), "text/csv")
+            self.assertIn("attachment", response.headers.get("Content-Disposition", ""))
+            rows = list(csv.DictReader(io.StringIO(response.read().decode("utf-8-sig"))))
+        self.assertEqual(len(rows), len(self.cases))
+        self.assertEqual(rows[0]["expected_categories"], "aadhaar")
+        self.assertIn("legitimate", {row["classification"] for row in rows})
+        self.assertIn("adversarial", {row["classification"] for row in rows})
+        stress_rows = [row for row in rows if row["stress_test"] == "yes"]
+        self.assertTrue(stress_rows)
+        self.assertTrue(all(row["note"] for row in stress_rows))
+
+    def test_benchmark_run_is_saved_and_results_csv_exports_detected_cases(self):
+        status, run = self.request("/api/benchmark/run", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(len(run["results"]), len(self.cases))
+        self.assertIn("run_id", run)
+
+        request = Request(
+            self.base_url + "/api/benchmark-results.csv",
+            headers={"X-Demo-User": "ananya"},
+        )
+        with urlopen(request) as response:
+            self.assertEqual(response.headers.get_content_type(), "text/csv")
+            rows = list(csv.DictReader(io.StringIO(response.read().decode("utf-8-sig"))))
+        self.assertEqual(len(rows), len(self.cases))
+        self.assertTrue(all(row["run_id"] == run["run_id"] for row in rows))
+        self.assertTrue({"yes", "no"} & {row["correct"] for row in rows})
+        self.assertIn("sanitized_prompt", rows[0])
+
+        status, isolated_rows = self.request("/api/state", user="rohan")
+        self.assertEqual(status, 200)
+        self.assertEqual(isolated_rows["prompts"], [])
+
+    def test_inspected_prompt_history_persists_only_redacted_prompt_data(self):
+        original_prompt = "My Aadhaar is 234567890123."
+        status, result = self.request("/api/chat", {"text": original_prompt})
+        self.assertEqual(status, 200)
+        self.assertEqual(result["status"], "delivered")
+
+        status, state = self.request("/api/state")
+        self.assertEqual(status, 200)
+        record = next(
+            prompt for prompt in state["prompts"]
+            if "[REDACTED SENSITIVE DATA]" in prompt["prompt"]
+        )
+        self.assertNotIn("234567890123", record["prompt"])
+        reopened_store = gateway.GatewayDataStore(gateway.DATA_STORE.path)
+        self.assertEqual(
+            reopened_store.prompts_for("ananya")[0]["prompt"],
+            record["prompt"],
+        )
+
+        request = Request(
+            self.base_url + "/api/prompts.csv",
+            headers={"X-Demo-User": "ananya"},
+        )
+        with urlopen(request) as response:
+            rows = list(csv.DictReader(io.StringIO(response.read().decode("utf-8-sig"))))
+        row = next(
+            prompt for prompt in rows
+            if "[REDACTED SENSITIVE DATA]" in prompt["sanitized_prompt"]
+        )
+        self.assertNotIn("234567890123", row["sanitized_prompt"])
+
     def test_unknown_demo_identity_receives_forbidden_response(self):
         status, result = self.request("/api/state", user="stale-user")
         self.assertEqual(status, 403)
         self.assertIn("error", result)
+
+    def test_demo_dashboard_has_synthetic_graph_data_without_prompt_content(self):
+        status, state = self.request("/api/state")
+        self.assertEqual(status, 200)
+        self.assertTrue(state["demo_data"])
+        self.assertTrue(any(event.get("demo") for event in state["events"]))
+        self.assertGreater(sum(state["categories"].values()), 0)
+        self.assertTrue(any(state["activity"]))
+        self.assertTrue(all("text" not in event for event in state["events"]))
 
     def test_local_personal_accounts_are_isolated_from_professional_workspace(self):
         self.assertTrue(gateway.PUBLIC_SIGNUP_ENABLED)
@@ -189,7 +273,7 @@ class GatewayInspectionTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(state["mode"], "personal")
             self.assertEqual(
-                state["users"]["personal-demo"]["name"], "Personal Demo Account"
+                state["users"][state["current_user"]]["name"], "Personal Demo Account"
             )
             status, result = self.request(
                 "/api/personal/demo-login",
@@ -199,19 +283,78 @@ class GatewayInspectionTests(unittest.TestCase):
             self.assertEqual(status, 200)
         finally:
             with gateway.SESSION_LOCK:
-                gateway.PERSONAL_USERS.pop("personal-demo", None)
+                demo_users = {
+                    user_id for user_id in gateway.PERSONAL_USERS
+                    if user_id.startswith("personal-demo-")
+                }
+                for user_id in demo_users:
+                    gateway.PERSONAL_USERS.pop(user_id, None)
                 for token, user_id in list(gateway.SESSIONS.items()):
-                    if user_id == "personal-demo":
+                    if user_id in demo_users:
                         gateway.SESSIONS.pop(token)
             with gateway.STATE.lock:
-                gateway.STATE.personal_events.pop("personal-demo", None)
-                gateway.STATE.personal_policies.pop("personal-demo", None)
+                for user_id in demo_users:
+                    gateway.STATE.personal_events.pop(user_id, None)
+                    gateway.STATE.personal_policies.pop(user_id, None)
 
     def test_personal_demo_login_is_disabled_with_public_signup(self):
-        with patch.object(gateway, "PUBLIC_SIGNUP_ENABLED", False):
+        with (
+            patch.object(gateway, "PUBLIC_SIGNUP_ENABLED", False),
+            patch.object(gateway, "PUBLIC_DEMO", False),
+        ):
             status, result = self.request("/api/personal/demo-login", {})
         self.assertEqual(status, 503)
         self.assertIn("not available", result["error"])
+
+    def test_hosted_personal_demo_login_is_enabled_and_isolated_per_visit(self):
+        cookies = []
+        user_ids = []
+        with (
+            patch.object(gateway, "PUBLIC_SIGNUP_ENABLED", False),
+            patch.object(gateway, "PUBLIC_DEMO", True),
+        ):
+            try:
+                for _ in range(2):
+                    request = Request(
+                        self.base_url + "/api/personal/demo-login",
+                        data=b"{}",
+                        headers={"Content-Type": "application/json"},
+                    )
+                    with urlopen(request) as response:
+                        cookies.append(response.headers["Set-Cookie"].split(";", 1)[0])
+                    status, state = self.request(
+                        "/api/state", extra_headers={"Cookie": cookies[-1]}
+                    )
+                    self.assertEqual(status, 200)
+                    self.assertEqual(state["mode"], "personal")
+                    user_ids.append(state["current_user"])
+                    self.assertTrue(state["demo_data"])
+                    self.assertTrue(any(state["activity"]))
+                    self.assertGreater(sum(state["categories"].values()), 0)
+                    self.assertTrue(all(event["demo"] for event in state["events"]))
+                self.assertNotEqual(user_ids[0], user_ids[1])
+                for user_id in user_ids:
+                    self.assertIn(user_id, gateway.PERSONAL_USERS)
+                status, _ = self.request(
+                    "/api/personal/register",
+                    {
+                        "name": "Hosted User",
+                        "email": "hosted@example.test",
+                        "password": "LongEnoughPass123!",
+                    },
+                )
+                self.assertEqual(status, 503)
+            finally:
+                with gateway.SESSION_LOCK:
+                    for user_id in user_ids:
+                        gateway.PERSONAL_USERS.pop(user_id, None)
+                    for token, user_id in list(gateway.SESSIONS.items()):
+                        if user_id in user_ids:
+                            gateway.SESSIONS.pop(token)
+                with gateway.STATE.lock:
+                    for user_id in user_ids:
+                        gateway.STATE.personal_events.pop(user_id, None)
+                        gateway.STATE.personal_policies.pop(user_id, None)
 
     def test_local_professional_demo_account_signup_login_and_session(self):
         self.assertFalse(gateway.AUTH_REQUIRED)
@@ -271,7 +414,7 @@ class GatewayInspectionTests(unittest.TestCase):
                 gateway.USERS.pop(user_id, None)
 
     def test_professional_demo_signup_is_disabled_for_hosted_deployment(self):
-        with patch.object(gateway, "AUTH_REQUIRED", True):
+        with patch.object(gateway, "HOSTED", True):
             status, result = self.request(
                 "/api/professional/demo-register",
                 {
@@ -283,6 +426,33 @@ class GatewayInspectionTests(unittest.TestCase):
             )
         self.assertEqual(status, 503)
         self.assertIn("hosted deployments", result["error"])
+
+    def test_render_without_hosted_users_does_not_fail_startup(self):
+        original_users = gateway.USERS
+        try:
+            with patch.dict(os.environ, {"RENDER": "true"}, clear=False):
+                os.environ.pop("GATEWAY_USERS_JSON", None)
+                gateway.USERS = {
+                    "ananya": {"name": "Ananya Sharma", "role": "analyst"}
+                }
+                gateway.load_hosted_users()
+                self.assertIn("ananya", gateway.USERS)
+        finally:
+            gateway.USERS = original_users
+
+    def test_hosted_public_demo_is_accessible_without_sign_in(self):
+        with (
+            patch.object(gateway, "AUTH_REQUIRED", False),
+            patch.object(gateway, "PUBLIC_DEMO", True),
+        ):
+            status, health = self.request("/api/health")
+            self.assertEqual(status, 200)
+            self.assertFalse(health["auth_required"])
+            self.assertTrue(health["public_demo"])
+            status, state = self.request("/api/state")
+        self.assertEqual(status, 200)
+        self.assertTrue(state["public_demo"])
+        self.assertEqual(state["current_user"], "ananya")
 
     def test_core_detection_benchmark_has_no_missed_or_false_positive_cases(self):
         missed = []
@@ -657,11 +827,12 @@ class GatewayInspectionTests(unittest.TestCase):
         self.assertIn("prompt_injection", result["findings"])
         model.assert_not_called()
 
-    def test_audit_events_do_not_store_prompt_content(self):
+    def test_audit_events_remain_content_free_while_prompt_history_is_stored(self):
         secret_prompt = "Do not retain this unique private text phrase."
         self.request("/api/chat", {"text": secret_prompt})
         _, state = self.request("/api/state")
-        self.assertNotIn(secret_prompt, json.dumps(state))
+        self.assertNotIn(secret_prompt, json.dumps(state["events"]))
+        self.assertIn(secret_prompt, [record["prompt"] for record in state["prompts"]])
 
     def test_live_benchmark_endpoint_serves_the_test_set(self):
         status, result = self.request("/api/benchmark")

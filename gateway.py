@@ -6,8 +6,11 @@ import json
 import os
 import re
 import base64
+import csv
 import io
 import zipfile
+import sqlite3
+from contextlib import contextmanager
 import hashlib
 import hmac
 import secrets
@@ -17,7 +20,7 @@ import time
 import urllib.error
 import urllib.request
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.cookies import SimpleCookie
 from getpass import getpass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -36,13 +39,17 @@ WEB_ROOT = ROOT / "web"
 MAX_BODY = 3_000_000
 MAX_PRIVATE_FILE_BYTES = 2_000_000
 MAX_PRIVATE_TEXT_CHARS = 100_000
+DATA_DIR = Path(os.environ.get("SANRAKSH_DATA_DIR", ROOT / "data")).expanduser()
+DATA_DB_PATH = DATA_DIR / "sanraksh.sqlite3"
 USERS = {
     "ananya": {"name": "Ananya Sharma", "role": "analyst"},
     "rohan": {"name": "Rohan Mehta", "role": "manager"},
     "priya": {"name": "Priya Nair", "role": "admin"},
 }
-AUTH_REQUIRED = bool(os.environ.get("RENDER") or os.environ.get("GATEWAY_USERS_JSON"))
-PUBLIC_SIGNUP_ENABLED = not AUTH_REQUIRED
+HOSTED = bool(os.environ.get("RENDER"))
+AUTH_REQUIRED = bool(os.environ.get("GATEWAY_USERS_JSON"))
+PUBLIC_DEMO = HOSTED and not AUTH_REQUIRED
+PUBLIC_SIGNUP_ENABLED = not HOSTED and not AUTH_REQUIRED
 PERSONAL_USERS: dict[str, dict] = {}
 SESSIONS: dict[str, str] = {}
 SESSION_LOCK = threading.Lock()
@@ -56,8 +63,6 @@ def load_hosted_users() -> None:
     global USERS
     configuration = os.environ.get("GATEWAY_USERS_JSON")
     if not configuration:
-        if os.environ.get("RENDER"):
-            raise RuntimeError("Set GATEWAY_USERS_JSON to enable authenticated hosted accounts.")
         return
     try:
         loaded = json.loads(configuration)
@@ -288,6 +293,238 @@ class GatewayState:
 STATE = GatewayState()
 
 
+class GatewayDataStore:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.lock = threading.Lock()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connection() as connection:
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS prompt_records (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    prompt TEXT NOT NULL,
+                    categories TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    outcome TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS prompt_records_user_time
+                    ON prompt_records(user_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS benchmark_runs (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    case_count INTEGER NOT NULL,
+                    correct_count INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS benchmark_runs_user_time
+                    ON benchmark_runs(user_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS benchmark_results (
+                    run_id TEXT NOT NULL REFERENCES benchmark_runs(id) ON DELETE CASCADE,
+                    case_number INTEGER NOT NULL,
+                    classification TEXT NOT NULL,
+                    expected_categories TEXT NOT NULL,
+                    detected_categories TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    correct INTEGER NOT NULL,
+                    stress_test INTEGER NOT NULL,
+                    prompt TEXT NOT NULL,
+                    note TEXT NOT NULL,
+                    PRIMARY KEY (run_id, case_number)
+                );
+                """
+            )
+            connection.execute("PRAGMA journal_mode=WAL")
+
+    @contextmanager
+    def _connection(self):
+        connection = sqlite3.connect(self.path, timeout=10)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA busy_timeout=10000")
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def record_prompt(
+        self, user_id: str, prompt: str, categories: list[str], action: str, outcome: str
+    ) -> dict:
+        record = {
+            "id": str(uuid4()),
+            "time": datetime.now(timezone.utc).isoformat(),
+            "prompt": prompt,
+            "categories": categories,
+            "action": action,
+            "outcome": outcome,
+        }
+        with self.lock, self._connection() as connection:
+            connection.execute(
+                "INSERT INTO prompt_records VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    record["id"], user_id, record["time"], prompt,
+                    json.dumps(categories), action, outcome,
+                ),
+            )
+            connection.execute(
+                """
+                DELETE FROM prompt_records
+                WHERE user_id = ? AND id NOT IN (
+                    SELECT id FROM prompt_records
+                    WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000
+                )
+                """,
+                (user_id, user_id),
+            )
+        return record
+
+    def prompts_for(self, user_id: str, limit: int = 50) -> list[dict]:
+        with self.lock, self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, created_at, prompt, categories, action, outcome
+                FROM prompt_records WHERE user_id = ?
+                ORDER BY created_at DESC LIMIT ?
+                """,
+                (user_id, limit),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "time": row["created_at"],
+                "prompt": row["prompt"],
+                "categories": json.loads(row["categories"]),
+                "action": row["action"],
+                "outcome": row["outcome"],
+            }
+            for row in rows
+        ]
+
+    def save_benchmark_run(
+        self, user_id: str, run_id: str, created_at: str, results: list[dict]
+    ) -> None:
+        with self.lock, self._connection() as connection:
+            connection.execute(
+                "INSERT INTO benchmark_runs VALUES (?, ?, ?, ?, ?)",
+                (
+                    run_id,
+                    user_id,
+                    created_at,
+                    len(results),
+                    sum(result["correct"] for result in results),
+                ),
+            )
+            connection.executemany(
+                """
+                INSERT INTO benchmark_results (
+                    run_id, case_number, classification, expected_categories,
+                    detected_categories, action, correct, stress_test, prompt, note
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        run_id,
+                        result["case_number"],
+                        result["classification"],
+                        json.dumps(result["expected_categories"]),
+                        json.dumps(result["detected_categories"]),
+                        result["action"],
+                        int(result["correct"]),
+                        int(result["stress_test"]),
+                        result["stored_prompt"],
+                        result["note"],
+                    )
+                    for result in results
+                ],
+            )
+            connection.execute(
+                """
+                DELETE FROM benchmark_runs
+                WHERE user_id = ? AND id NOT IN (
+                    SELECT id FROM benchmark_runs
+                    WHERE user_id = ? ORDER BY created_at DESC LIMIT 100
+                )
+                """,
+                (user_id, user_id),
+            )
+
+    def benchmark_results_for(self, user_id: str) -> list[dict]:
+        with self.lock, self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT r.id AS run_id, r.created_at, r.case_count,
+                       b.case_number, b.classification, b.expected_categories,
+                       b.detected_categories, b.action, b.correct, b.stress_test,
+                       b.prompt, b.note
+                FROM benchmark_results b
+                JOIN benchmark_runs r ON r.id = b.run_id
+                WHERE r.user_id = ?
+                ORDER BY r.created_at DESC, b.case_number
+                """,
+                (user_id,),
+            ).fetchall()
+        return [
+            {
+                "run_id": row["run_id"],
+                "run_time": row["created_at"],
+                "case_count": row["case_count"],
+                "case_number": row["case_number"],
+                "classification": row["classification"],
+                "expected_categories": json.loads(row["expected_categories"]),
+                "detected_categories": json.loads(row["detected_categories"]),
+                "action": row["action"],
+                "correct": bool(row["correct"]),
+                "stress_test": bool(row["stress_test"]),
+                "prompt": row["prompt"],
+                "note": row["note"],
+            }
+            for row in rows
+        ]
+
+
+DATA_STORE = GatewayDataStore(DATA_DB_PATH)
+DEMO_PRESENTATION_EVENTS = [
+    (5.2, ["aadhaar"], "mask", "synthetic identifier masked"),
+    (4.6, ["pan", "financial"], "redact", "synthetic financial details redacted"),
+    (3.9, ["phone"], "mask", "synthetic phone number masked"),
+    (3.3, ["credentials"], "block", "synthetic credential request blocked"),
+    (2.7, ["prompt_injection"], "block", "synthetic extraction attempt blocked"),
+    (2.1, ["confidential"], "block", "synthetic confidential content withheld"),
+    (1.5, ["restricted_data"], "block", "synthetic unauthorized retrieval denied"),
+    (0.9, ["aadhaar", "phone"], "mask", "synthetic personal data masked"),
+    (0.3, ["financial"], "redact", "synthetic financial detail redacted"),
+]
+
+
+def _demo_events(user: str, role: str, *, personal: bool = False) -> list[dict]:
+    now = datetime.now(timezone.utc)
+    events = []
+    for hours_ago, categories, action, outcome in DEMO_PRESENTATION_EVENTS:
+        if personal and "restricted_data" in categories:
+            continue
+        events.append({
+            "id": str(uuid4()),
+            "time": (now - timedelta(hours=hours_ago)).isoformat(),
+            "user": user,
+            "role": role,
+            "categories": categories.copy(),
+            "action": action,
+            "outcome": outcome,
+            "demo": True,
+        })
+    return events
+
+
+if not AUTH_REQUIRED:
+    STATE.events.extend(_demo_events("Demo workspace", "analyst"))
+
+
 def _luhn(value: str) -> bool:
     digits = [int(char) for char in value if char.isdigit()]
     if len(digits) < 13 or len(digits) > 19:
@@ -341,6 +578,24 @@ def apply_redaction(text: str, findings: list[dict], policies: dict[str, str]) -
     for start, end, replacement in sorted(edits, reverse=True):
         result = result[:start] + replacement + result[end:]
     return result
+
+
+def _stored_prompt(text: str, findings: list[dict]) -> str:
+    spans = sorted(
+        (finding["start"], finding["end"])
+        for finding in findings
+        if finding["start"] < finding["end"]
+    )
+    merged = []
+    for start, end in spans:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    stored = text
+    for start, end in reversed(merged):
+        stored = stored[:start] + "[REDACTED SENSITIVE DATA]" + stored[end:]
+    return stored
 
 
 def _policy_decision(findings: list[dict], policies: dict[str, str]) -> str:
@@ -541,6 +796,31 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _csv_download(self, filename: str, columns: list[str], rows: list[list]) -> None:
+        output = io.StringIO(newline="")
+        writer = csv.writer(output)
+        writer.writerow(columns)
+        for row in rows:
+            safe_row = []
+            for value in row:
+                if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@", "\t", "\r")):
+                    value = "'" + value
+                safe_row.append(value)
+            writer.writerow(safe_row)
+        body = ("\ufeff" + output.getvalue()).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/csv; charset=utf-8")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _storage_error(self, error: sqlite3.Error) -> None:
+        print(f"Sanraksh data store error: {error}", file=sys.stderr)
+        self._json(500, {"error": "Persistent data storage is unavailable."})
+
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         if length < 0 or length > MAX_BODY:
@@ -594,6 +874,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     "status": "ok",
                     "auth_required": AUTH_REQUIRED,
                     "public_signup_enabled": PUBLIC_SIGNUP_ENABLED,
+                    "public_demo": PUBLIC_DEMO,
                 },
             )
             return
@@ -611,6 +892,11 @@ class GatewayHandler(BaseHTTPRequestHandler):
         if path == "/api/state":
             account = _account(user_id)
             events = STATE.events_for(user_id)
+            try:
+                prompts = DATA_STORE.prompts_for(user_id)
+            except sqlite3.Error as error:
+                self._storage_error(error)
+                return
             with STATE.lock:
                 policies = (
                     STATE.personal_policies.setdefault(user_id, DEFAULT_POLICIES.copy()).copy()
@@ -640,6 +926,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 200,
                 {
                     "events": events[:50],
+                    "prompts": prompts,
+                    "demo_data": any(event.get("demo") for event in events),
                     "policies": policies,
                     "approvals": approvals,
                     "categories": dict(counts),
@@ -653,6 +941,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     ),
                     "mode": "personal" if account["role"] == "personal" else "professional",
                     "public_signup_enabled": PUBLIC_SIGNUP_ENABLED,
+                    "public_demo": PUBLIC_DEMO,
                     "model": {
                         "configured": bool(os.environ.get("LLM_BASE_URL") and os.environ.get("LLM_MODEL")),
                         "name": os.environ.get("LLM_MODEL", "") or "Safe simulation",
@@ -663,6 +952,68 @@ class GatewayHandler(BaseHTTPRequestHandler):
         if path == "/api/benchmark":
             benchmark = json.loads((ROOT / "benchmarks" / "prompts.json").read_text(encoding="utf-8"))
             self._json(200, {"cases": benchmark})
+            return
+        if path == "/api/benchmark.csv":
+            benchmark = json.loads((ROOT / "benchmarks" / "prompts.json").read_text(encoding="utf-8"))
+            rows = []
+            for index, case in enumerate(benchmark, start=1):
+                expected = case["expected"]
+                rows.append([
+                    index,
+                    "adversarial" if expected is not None else "legitimate",
+                    ";".join(expected) if isinstance(expected, list) else expected or "",
+                    "yes" if case.get("stress") else "no",
+                    case["text"],
+                    case.get("note", ""),
+                ])
+            self._csv_download(
+                "sanraksh-benchmark-cases.csv",
+                ["case", "classification", "expected_categories", "stress_test", "prompt", "note"],
+                rows,
+            )
+            return
+        if path == "/api/benchmark-results.csv":
+            try:
+                results = DATA_STORE.benchmark_results_for(user_id)
+            except sqlite3.Error as error:
+                self._storage_error(error)
+                return
+            self._csv_download(
+                "sanraksh-benchmark-results.csv",
+                [
+                    "run_id", "run_time_utc", "case", "case_count", "classification",
+                    "expected_categories", "detected_categories", "policy_action",
+                    "correct", "stress_test", "sanitized_prompt", "note",
+                ],
+                [
+                    [
+                        row["run_id"], row["run_time"], row["case_number"], row["case_count"],
+                        row["classification"], ";".join(row["expected_categories"]),
+                        ";".join(row["detected_categories"]), row["action"],
+                        "yes" if row["correct"] else "no",
+                        "yes" if row["stress_test"] else "no", row["prompt"], row["note"],
+                    ]
+                    for row in results
+                ],
+            )
+            return
+        if path == "/api/prompts.csv":
+            try:
+                prompts = DATA_STORE.prompts_for(user_id, limit=1000)
+            except sqlite3.Error as error:
+                self._storage_error(error)
+                return
+            self._csv_download(
+                "sanraksh-prompt-history.csv",
+                ["record_id", "time_utc", "sanitized_prompt", "categories", "policy_action", "outcome"],
+                [
+                    [
+                        record["id"], record["time"], record["prompt"],
+                        ";".join(record["categories"]), record["action"], record["outcome"],
+                    ]
+                    for record in prompts
+                ],
+            )
             return
         if path == "/api/documents":
             user_id = self._user()
@@ -726,21 +1077,21 @@ class GatewayHandler(BaseHTTPRequestHandler):
             payload = self._body()
             path = urlparse(self.path).path
             if path == "/api/personal/demo-login":
-                if not PUBLIC_SIGNUP_ENABLED:
+                if not (PUBLIC_SIGNUP_ENABLED or PUBLIC_DEMO):
                     self._json(
                         503,
                         {"error": "Personal demo sign-in is not available on this hosted deployment."},
                     )
                     return
-                user_id = "personal-demo"
+                user_id = "personal-demo-" + uuid4().hex
                 with SESSION_LOCK:
-                    PERSONAL_USERS.setdefault(
-                        user_id,
-                        {
-                            "name": "Personal Demo Account",
-                            "email": "demo@sanraksh.local",
-                            "role": "personal",
-                        },
+                    PERSONAL_USERS[user_id] = {
+                        "name": "Personal Demo Account",
+                        "role": "personal",
+                    }
+                with STATE.lock:
+                    STATE.personal_events[user_id] = _demo_events(
+                        "Personal Demo", "personal", personal=True
                     )
                 self._start_session(user_id)
                 return
@@ -748,7 +1099,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 "/api/professional/demo-register",
                 "/api/professional/demo-login",
             }:
-                if AUTH_REQUIRED:
+                if HOSTED:
                     self._json(
                         503,
                         {"error": "Professional demo accounts are unavailable on hosted deployments."},
@@ -887,7 +1238,9 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
                 return
             user_id = self._user()
-            if path == "/api/chat":
+            if path == "/api/benchmark/run":
+                self._run_benchmark(user_id)
+            elif path == "/api/chat":
                 self._chat(user_id, payload)
             elif path == "/api/retrieve":
                 self._retrieve_endpoint(user_id, payload)
@@ -907,6 +1260,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self._json(400, {"error": str(error)})
         except RuntimeError as error:
             self._json(502, {"error": str(error)})
+        except sqlite3.Error as error:
+            self._storage_error(error)
 
     def _add_document(self, user_id: str, payload: dict) -> None:
         if _account(user_id)["role"] != "admin":
@@ -1006,6 +1361,57 @@ class GatewayHandler(BaseHTTPRequestHandler):
             },
         )
 
+    def _run_benchmark(self, user_id: str) -> None:
+        benchmark = json.loads((ROOT / "benchmarks" / "prompts.json").read_text(encoding="utf-8"))
+        policies = STATE.policies_for(user_id)
+        run_id = str(uuid4())
+        run_time = datetime.now(timezone.utc).isoformat()
+        results = []
+        response_results = []
+        for case_number, case in enumerate(benchmark, start=1):
+            findings = inspect_text(case["text"])
+            detected = sorted({item["category"] for item in findings})
+            expected_value = case["expected"]
+            expected = (
+                [] if expected_value is None
+                else expected_value if isinstance(expected_value, list)
+                else [expected_value]
+            )
+            correct = set(expected) == set(detected)
+            action = _policy_decision(findings, policies)
+            result = {
+                "case_number": case_number,
+                "classification": "adversarial" if expected else "legitimate",
+                "expected_categories": expected,
+                "detected_categories": detected,
+                "action": action,
+                "correct": correct,
+                "stress_test": bool(case.get("stress")),
+                "stored_prompt": _stored_prompt(case["text"], findings),
+                "note": case.get("note", ""),
+            }
+            results.append(result)
+            response_results.append({
+                "case_number": case_number,
+                "classification": result["classification"],
+                "expected_categories": expected,
+                "detected_categories": detected,
+                "action": action,
+                "correct": correct,
+                "stress_test": result["stress_test"],
+                "prompt": case["text"],
+                "note": result["note"],
+            })
+        DATA_STORE.save_benchmark_run(user_id, run_id, run_time, results)
+        self._json(
+            200,
+            {
+                "run_id": run_id,
+                "run_time": run_time,
+                "results": response_results,
+            },
+        )
+
     def _chat(self, user_id: str, payload: dict) -> None:
         text = payload.get("text")
         if not isinstance(text, str) or not text.strip() or len(text) > 20_000:
@@ -1031,6 +1437,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
         policies = STATE.policies_for(user_id)
         action = _policy_decision(findings, policies)
         if action == "block":
+            DATA_STORE.record_prompt(
+                user_id, _stored_prompt(text, prompt_findings), categories,
+                action, "blocked before model",
+            )
             STATE.log(user_id, categories, "block", "blocked before model")
             if attachment_result:
                 attachment_result["status"] = "blocked"
@@ -1050,6 +1460,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     "categories": categories,
                     "created": time.time(),
                 }
+            DATA_STORE.record_prompt(
+                user_id, _stored_prompt(text, prompt_findings), categories,
+                action, "awaiting approval",
+            )
             STATE.log(user_id, categories, "approval", "awaiting approval")
             if attachment_result:
                 attachment_result["status"] = "held for approval"
@@ -1069,6 +1483,11 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 }
         documents, inaccessible = _retrieve(user_id, sanitized)
         if inaccessible:
+            categories = sorted(set(categories + ["restricted_data"]))
+            DATA_STORE.record_prompt(
+                user_id, _stored_prompt(text, prompt_findings), categories,
+                "block", "unauthorized retrieval denied",
+            )
             STATE.log(user_id, ["restricted_data"], "block", "unauthorized retrieval denied")
             if attachment_result:
                 attachment_result["status"] = "not sent; request blocked"
@@ -1086,6 +1505,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
         if indirect_injection:
             categories = sorted(set(categories + ["prompt_injection"]))
             if policies.get("prompt_injection") == "block":
+                DATA_STORE.record_prompt(
+                    user_id, _stored_prompt(text, prompt_findings), categories,
+                    "block", "indirect injection blocked",
+                )
                 STATE.log(user_id, categories, "block", "indirect injection blocked")
                 if attachment_result:
                     attachment_result["status"] = "not sent; request blocked"
@@ -1097,13 +1520,22 @@ class GatewayHandler(BaseHTTPRequestHandler):
         output_categories = sorted({item["category"] for item in output_findings})
         output_action = _policy_decision(output_findings, policies)
         if output_action == "block":
-            STATE.log(user_id, sorted(set(categories + output_categories)), "block", "sensitive response withheld")
+            combined_categories = sorted(set(categories + output_categories))
+            DATA_STORE.record_prompt(
+                user_id, _stored_prompt(text, prompt_findings), combined_categories,
+                "block", "sensitive response withheld",
+            )
+            STATE.log(user_id, combined_categories, "block", "sensitive response withheld")
             self._json(200, {"status": "response_blocked", "findings": output_categories, "message": "The model response contained restricted content and was withheld.", "attachment": attachment_result})
             return
         reply = apply_redaction(reply, output_findings, policies)
         combined = sorted(set(categories + output_categories))
         event_action = "redact" if action == "redact" or output_action == "redact" else (
             "warn" if action == "warn" or output_action == "warn" else "allow"
+        )
+        DATA_STORE.record_prompt(
+            user_id, _stored_prompt(text, prompt_findings), combined,
+            event_action, "delivered",
         )
         STATE.log(user_id, combined, event_action, "delivered")
         self._json(
