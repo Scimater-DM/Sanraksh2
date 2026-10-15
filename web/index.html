@@ -145,16 +145,6 @@
                 <p id="document-upload-status" role="status">Stored in server memory for this demo; documents are removed when the server restarts. Do not upload real confidential records.</p>
               </form>
               <div class="document-source-note"><strong>FICTIONAL DEMO LIBRARY <span>SAFE SAMPLE DATA</span></strong><span id="document-guidance">Need another document? Ask a workspace admin to choose a .txt or .md file from their device and assign access roles. Demo uploads are temporary—use fictional or non-sensitive samples only.</span></div>
-              <div class="upload-checklist">
-                <div class="subheading">DOCUMENT HANDLING</div>
-                <div><i>TXT</i><span><strong>Text and Markdown files</strong><small>.txt or .md · up to 100 KB</small></span></div>
-                <div><i>ACL</i><span><strong>Role-scoped access</strong><small>Only selected roles can retrieve uploaded text.</small></span></div>
-                <div><i>DEMO</i><span><strong>Temporary demo storage</strong><small>Uploads reset on restart. Keep real records out.</small></span></div>
-              </div>
-              <div class="knowledge-governance">
-                <div class="knowledge-governance-icon" aria-hidden="true">◈</div>
-                <div><strong>Why can only an admin add shared documents?</strong><p>This demo treats uploads as shared team knowledge. Admins assign its access roles, which helps prevent accidental oversharing or unreviewed instructions entering the library.</p><small>Employees can ask an admin to add a document. A production system can add personal uploads or an approval workflow through the company’s document platform.</small></div>
-              </div>
             </div>
             <div class="retrieval-test">
               <div class="subheading">CHECK DOCUMENT ACCESS</div>
@@ -165,6 +155,18 @@
               <div class="access-assurance">
                 <div><span>01</span><p><strong>Permission checked first</strong><small>Unauthorized document content is not returned to the model.</small></p></div>
                 <div><span>02</span><p><strong>Retrieved text screened</strong><small>Detected hidden instructions are quarantined before model use.</small></p></div>
+              </div>
+              <div id="admin-document-guidance" class="admin-document-guidance hidden">
+                <div class="upload-checklist">
+                  <div class="subheading">DOCUMENT HANDLING</div>
+                  <div><i>TXT</i><span><strong>Text and Markdown files</strong><small>.txt or .md · up to 100 KB</small></span></div>
+                  <div><i>ACL</i><span><strong>Role-scoped access</strong><small>Only selected roles can retrieve uploaded text.</small></span></div>
+                  <div><i>DEMO</i><span><strong>Temporary demo storage</strong><small>Uploads reset on restart. Keep real records out.</small></span></div>
+                </div>
+                <div class="knowledge-governance">
+                  <div class="knowledge-governance-icon" aria-hidden="true">◈</div>
+                  <div><strong>Why can only an admin add shared documents?</strong><p>This demo treats uploads as shared team knowledge. Admins assign access roles to reduce accidental oversharing and unreviewed instructions.</p><small>Production systems can support personal uploads or approval workflows through the company document platform.</small></div>
+                </div>
               </div>
             </div>
           </div>

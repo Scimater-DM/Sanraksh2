@@ -174,6 +174,7 @@ textarea::placeholder,input::placeholder{color:#62727d}
 .access-assurance p{display:grid;gap:2px;margin:0}
 .access-assurance strong{color:#b3c4c7;font-size:8px;font-weight:600}
 .access-assurance small{color:#7d9096;font-size:8px;line-height:1.45}
+.admin-document-guidance{display:grid;gap:0}
 .upload-checklist{display:grid;gap:10px;margin-top:12px;padding:11px;border:1px solid #293b43;border-radius:5px;background:#111b23}
 .upload-checklist>.subheading{margin-bottom:1px}
 .upload-checklist>div:not(.subheading){display:flex;align-items:flex-start;gap:9px}
