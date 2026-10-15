@@ -328,6 +328,7 @@ async function loadDocuments() {
     ).join("") || '<div class="empty-docs">No authorized documents.</div>';
     document.getElementById("document-upload").classList.toggle("hidden", !data.can_upload);
     document.getElementById("admin-document-guidance").classList.toggle("hidden", !data.can_upload);
+    document.getElementById("member-access-note").classList.toggle("hidden", data.can_upload);
     document.getElementById("document-guidance").textContent = data.can_upload
       ? "Use the uploader above to add a .txt or .md file from your device and assign access roles. Uploads are temporary; do not add confidential records."
       : "Need another document? Ask a workspace admin to choose a .txt or .md file from their device and assign access roles. Demo uploads are temporary—use fictional or non-sensitive samples only.";

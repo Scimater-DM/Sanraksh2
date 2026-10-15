@@ -145,6 +145,12 @@ textarea::placeholder,input::placeholder{color:#62727d}
 .document-source-note strong{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#b5c4c8;font:8px var(--mono);letter-spacing:.55px}
 .document-source-note strong span{padding:3px 5px;border:1px solid #29483d;border-radius:4px;color:#83d9b4;font-size:7px}
 .document-source-note span{color:#7f9199;font-size:8px;line-height:1.5}
+.role-guidance{display:flex;align-items:flex-start;gap:7px;margin-top:0;padding:4px 6px;border:1px solid #293b43;border-radius:5px;background:#111b23}
+.role-guidance>span{flex:none;display:grid;place-items:center;min-width:28px;height:20px;padding:0 4px;border:1px solid #344a4a;border-radius:4px;color:#93cdbd;font:7px var(--mono)}
+.role-guidance p{display:grid;gap:2px;margin:0}
+.role-guidance strong{color:#b3c4c6;font-size:8px;font-weight:600}
+.role-guidance small{color:#7d9095;font-size:8px;line-height:1.4}
+.admin-sharing-note{margin:0 0 1px;border-color:#35453a;background:#171f1c}
 .document-upload{display:grid;gap:8px;margin-top:12px;padding:12px;border:1px solid #30443e;border-radius:6px;background:#121f20}
 .document-upload .subheading{display:flex;justify-content:space-between;align-items:center}
 .document-upload .subheading span{color:#8dd8b5;background:#1a332b}
