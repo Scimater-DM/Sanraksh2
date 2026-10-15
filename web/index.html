@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1118">
+  <title>Sanraksh — AI Security Gateway</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#" aria-label="Sanraksh home">
+        <picture class="brand-picture">
+          <source media="(max-width: 850px)" srcset="/assets/sanraksh-mark.png">
+          <img class="brand-logo" src="/assets/sanraksh-logo-trim.png" alt="Sanraksh AI Security Gateway">
+        </picture>
+      </a>
+      <div class="nav-label">WORKSPACE</div>
+      <nav class="main-nav" aria-label="Main navigation">
+        <a class="nav-item active" href="#overview"><span class="nav-icon">◫</span>Overview</a>
+        <a class="nav-item" href="#gateway"><span class="nav-icon">⌘</span>Live gateway</a>
+        <a class="nav-item" href="#access"><span class="nav-icon">◈</span>Access &amp; RAG</a>
+        <a class="nav-item" href="#policies"><span class="nav-icon">☷</span>Policies</a>
+        <a class="nav-item" href="#audit"><span class="nav-icon">≋</span>Audit trail</a>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-note"><span class="tiny-shield">✓</span><div><strong>Privacy by design</strong><small>Audit events never store prompt text.</small></div></div>
+      <div class="sidebar-bottom"><span class="avatar">AG</span><div><strong id="sidebar-user">Demo workspace</strong><small id="sidebar-role">Local security lab</small></div><button id="logout-button" class="icon-button hidden" title="Sign out">↗</button></div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div class="crumb">Workspace <span>/</span> <strong>Security overview</strong></div>
+        <div class="topbar-right">
+          <span class="environment"><i></i><span id="environment-label">LOCAL DEMO</span></span>
+          <span class="model-pill"><span class="model-dot"></span><span id="model-label">Connecting…</span></span>
+          <div id="identity-picker" class="identity-picker hidden"><label for="identity-select">Acting as</label><select id="identity-select"></select></div>
+          <div id="secure-identity" class="secure-identity hidden"></div>
+        </div>
+      </header>
+
+      <div class="page-wrap">
+        <section id="overview" class="page-heading">
+          <div><div class="eyebrow"><span class="eyebrow-dot"></span>INDIA-FOCUSED AI SECURITY</div><h1>Security overview</h1><p>Protect employee and citizen data before it reaches an AI model.</p></div>
+          <button id="refresh-button" class="button button-quiet"><span>↻</span> Refresh data</button>
+        </section>
+
+        <section class="hero-banner">
+          <div class="hero-copy"><span class="hero-tag"><span class="pulse"></span> GATEWAY ACTIVE</span><h2>Catch the leak <span>before it leaves.</span></h2><p>Catch accidental disclosures, prompt injection, and unauthorized document access before model dispatch.</p><div class="hero-meta"><span class="hero-check">✓</span> Aadhaar · PAN · UPI <b>·</b> <span class="hero-check">✓</span> Permission-aware retrieval <b>·</b> <span class="hero-check">✓</span> Content-free audit</div></div>
+          <div class="hero-visual" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="core-shield"><svg viewBox="0 0 60 60"><path d="M30 5 50 13v13c0 13-8.5 22-20 29C18.5 48 10 39 10 26V13L30 5Z"/><path d="m21 30 6 6 13-14"/></svg></div><span class="orbit-node node-top">PROMPT</span><span class="orbit-node node-right">LLM</span><span class="orbit-node node-bottom">RESPONSE</span><span class="orbit-node node-left">RAG</span></div>
+        </section>
+
+        <section class="stat-grid" aria-label="Gateway metrics">
+          <article class="stat-card"><div class="stat-top"><span>Requests inspected</span><span class="stat-icon icon-blue">↗</span></div><div id="stat-total" class="stat-value">0</div><div class="stat-foot"><span class="muted">All-time this session</span><span class="stat-trend">LIVE</span></div></article>
+          <article class="stat-card"><div class="stat-top"><span>Requests blocked</span><span class="stat-icon icon-red">⊘</span></div><div id="stat-blocked" class="stat-value">0</div><div class="stat-foot"><span class="muted">Before reaching the model</span><span id="blocked-rate" class="stat-trend red-text">0%</span></div></article>
+          <article class="stat-card"><div class="stat-top"><span>Sensitive items caught</span><span class="stat-icon icon-amber">⌕</span></div><div id="stat-findings" class="stat-value">0</div><div class="stat-foot"><span class="muted">PII, secrets &amp; injection</span><span class="stat-trend amber-text">PREVENTED</span></div></article>
+          <article class="stat-card"><div class="stat-top"><span>Authorized sources</span><span class="stat-icon icon-green">◈</span></div><div id="stat-docs" class="stat-value">—</div><div class="stat-foot"><span class="muted">Permission-filtered for you</span><span class="stat-trend green-text">ENFORCED</span></div></article>
+        </section>
+
+        <section class="impact-panel" aria-labelledby="impact-title">
+          <div class="impact-heading">
+            <div><div class="section-kicker">A 30-SECOND TABLETOP</div><h2 id="impact-title">One prompt. A real-world ripple.</h2><p>Explore how a small AI security gap could affect people, records, and public trust—and where the gateway can interrupt it.</p></div>
+            <span class="impact-note"><span>✳</span> Awareness, not a prediction</span>
+          </div>
+          <div class="impact-tabs" role="tablist" aria-label="Explore AI security impact scenarios">
+            <button class="impact-tab selected" id="impact-tab-pii" type="button" role="tab" aria-selected="true" aria-controls="impact-story" data-impact="pii">Citizen data</button>
+            <button class="impact-tab" id="impact-tab-indirect" type="button" role="tab" aria-selected="false" aria-controls="impact-story" data-impact="indirect">Hidden instruction</button>
+            <button class="impact-tab" id="impact-tab-rag" type="button" role="tab" aria-selected="false" aria-controls="impact-story" data-impact="rag">Restricted record</button>
+          </div>
+          <div id="impact-story" class="impact-story" role="tabpanel" aria-labelledby="impact-tab-pii" aria-live="polite">
+            <div class="impact-flow">
+              <article class="impact-step"><span class="impact-step-label">THE MOMENT</span><strong id="impact-trigger">A staff member pastes an Aadhaar number into a drafting request.</strong><small>Often accidental. The request looks like ordinary work.</small></article>
+              <span class="impact-arrow" aria-hidden="true">→</span>
+              <article class="impact-step impact-risk"><span class="impact-step-label">IF IT GOES UNCHECKED</span><strong id="impact-consequence">Personal data could leave the approved boundary, depending on provider and retention settings.</strong><small id="impact-human-impact">The person affected may face privacy harm; the organization may need incident review and response.</small></article>
+              <span class="impact-arrow" aria-hidden="true">→</span>
+              <article class="impact-step impact-control"><span class="impact-step-label">THE INTERRUPTION</span><strong id="impact-control">Sanraksh masks the identifier before model dispatch.</strong><small id="impact-proof">The model can help with the draft without receiving the original number.</small></article>
+            </div>
+            <div class="impact-footer"><span>Risk depends on context and safeguards; exposure is a possibility, not an inevitable outcome.</span><button id="impact-try" class="button button-secondary" type="button">Try this scenario <span>→</span></button></div>
+          </div>
+        </section>
+
+        <section class="quick-game" aria-labelledby="game-title">
+          <div class="game-intro">
+            <span class="game-mark" aria-hidden="true">✳</span>
+            <div><div class="section-kicker">THE 30-SECOND SECURITY PAUSE</div><h2 id="game-title">Spot the safest move</h2><p>Three everyday AI moments. Pick what you would do—then see what the gateway checks.</p></div>
+            <span class="game-time">3 DECISIONS · NO TIMER</span>
+          </div>
+          <div id="game-start" class="game-start"><span>Practice only: answers are not sent to the gateway or saved in its audit log.</span><button id="game-start-button" class="button button-primary" type="button">Play a quick round <span>→</span></button></div>
+          <div id="game-round" class="game-round hidden" aria-live="polite">
+            <div class="game-progress-head"><span id="game-progress-label">DECISION 1 OF 3</span><span id="game-score">0 correct</span></div>
+            <div class="game-progress-track"><i id="game-progress-bar"></i></div>
+            <p id="game-prompt" class="game-prompt"></p>
+            <div id="game-choices" class="game-choices"></div>
+            <div id="game-feedback" class="game-feedback hidden" role="status"></div>
+            <button id="game-next-button" class="button button-secondary hidden" type="button">Next decision <span>→</span></button>
+          </div>
+          <div id="game-complete" class="game-complete hidden" role="status">
+            <strong id="game-result-title"></strong><p id="game-result-copy"></p>
+            <button id="game-replay-button" class="button button-secondary" type="button">Play again <span>↻</span></button>
+          </div>
+        </section>
+
+        <div class="content-grid">
+          <section id="gateway" class="panel gateway-panel">
+            <div class="panel-heading"><div><div class="section-kicker">TRY THE GATEWAY</div><h2>Live request inspection</h2><p>Run a request through the same controls used by the gateway.</p></div><span class="live-chip"><i></i> LIVE</span></div>
+            <div class="scenario-row"><button class="scenario-chip" data-scenario="pii"><span class="scenario-icon amber-text">◇</span>Personal data</button><button class="scenario-chip" data-scenario="injection"><span class="scenario-icon red-text">⌁</span>Prompt injection</button><button class="scenario-chip" data-scenario="rag"><span class="scenario-icon blue-text">◈</span>Restricted document</button><button class="scenario-chip" data-scenario="indirect"><span class="scenario-icon violet-text">↳</span>Hidden in a document</button></div>
+            <label class="field-label" for="prompt-input">YOUR MESSAGE <span>Inspected before model dispatch</span></label>
+            <textarea id="prompt-input" rows="4" placeholder="Try a scenario above, or enter a prompt to inspect…"></textarea>
+            <div class="composer-footer"><span class="privacy-note"><span>⌑</span> Content is processed in memory only</span><button id="send-button" class="button button-primary">Inspect &amp; send <span>→</span></button></div>
+            <div id="result-box" class="result-box hidden" aria-live="polite"></div>
+            <div class="gateway-foot"><span><i class="status-led"></i> Prompt scan</span><span><i class="status-led"></i> Policy enforcement</span><span><i class="status-led"></i> Response scan</span></div>
+          </section>
+
+          <section class="panel signals-panel">
+            <div class="panel-heading"><div><div class="section-kicker">THREAT SIGNALS</div><h2>What we catch</h2><p>Flagged categories from this session.</p></div><span class="subtle-link">8 controls</span></div>
+            <div id="category-list" class="category-list"></div>
+            <div class="signals-note"><span>✳</span><p>Pattern detection is a fast first layer. Tune policies to match your data and risk tolerance.</p></div>
+            <div class="activity-trend"><div class="trend-heading"><span>REQUEST ACTIVITY</span><span>LAST 6 HOURS</span></div><div id="activity-chart" class="activity-chart" role="img" aria-label="Gateway requests per hour over the last six hours"></div></div>
+          </section>
+        </div>
+
+        <section id="access" class="panel access-panel">
+          <div class="panel-heading"><div><div class="section-kicker">RETRIEVAL ACCESS CONTROL</div><h2>Knowledge, scoped to identity</h2><p>Every document is filtered on the server before it can reach an AI context.</p></div><div class="role-tag"><span class="role-dot"></span><span id="access-role">Analyst</span> access</div></div>
+          <div class="access-layout"><div class="doc-list-wrap"><div class="subheading">DOCUMENTS AVAILABLE TO YOU <span id="doc-count">0</span></div><div id="document-list" class="document-list"></div></div><div class="retrieval-test"><div class="subheading">TEST A RETRIEVAL</div><p>Ask for a document by name. Unauthorized sources are denied on the server.</p><div class="retrieve-form"><input id="retrieve-input" value="payroll-master restricted payroll register" aria-label="Document retrieval query"><button id="retrieve-button" class="button button-secondary">Check access</button></div><div id="retrieve-result" class="retrieve-result">Ready to verify document permissions.</div><div class="access-foot"><span>◈</span> Role comes from the authenticated session—not the prompt.</div></div></div>
+        </section>
+
+        <section id="policies" class="panel policy-panel">
+          <div class="panel-heading"><div><div class="section-kicker">ENFORCEMENT</div><h2>Policy controls</h2><p>Choose what happens when a category is detected. Changes take effect immediately.</p></div><span class="policy-live"><i></i> ACTIVE</span></div>
+          <div class="preset-strip"><div><strong>Start with a policy profile</strong><small>Purpose-built starting points; review before connecting real data.</small></div><div id="preset-list" class="preset-list"><button class="preset-button" data-preset="public-sector">India public sector</button><button class="preset-button" data-preset="finance">Finance</button><button class="preset-button" data-preset="high-security">High security</button></div></div>
+          <div id="policy-status" class="policy-status" role="status">Select a profile to update all controls together, then review each rule below.</div>
+          <div id="policy-grid" class="policy-grid"></div>
+        </section>
+
+        <section id="approvals" class="panel approval-panel hidden">
+          <div class="panel-heading"><div><div class="section-kicker">HUMAN REVIEW</div><h2>Requests awaiting approval</h2><p>Held requests are not sent to the model unless a manager approves them.</p></div><span class="policy-live"><i></i> HELD</span></div>
+          <div id="approval-list" class="approval-list"></div>
+        </section>
+
+        <section class="panel benchmark-panel">
+          <div class="panel-heading"><div><div class="section-kicker">QUALITY CHECK</div><h2>Detection benchmark</h2><p>Repeatable test set of legitimate and adversarial prompts. Runs locally against live rules.</p></div><button id="benchmark-button" class="button button-secondary">Run benchmark <span>→</span></button></div>
+          <div class="benchmark-content"><div class="benchmark-score"><div id="benchmark-accuracy">—</div><span>CASE ACCURACY</span></div><div class="benchmark-detail"><div id="benchmark-copy">No benchmark run yet. Test both detection and false positives before adjusting controls.</div><div class="bench-track"><div id="benchmark-progress"></div></div><div class="benchmark-legend"><span><i class="legend-green"></i> Correctly classified</span><span><i class="legend-red"></i> Misclassified</span><span id="benchmark-count">67 synthetic prompts · includes stress cases</span></div></div></div>
+          <div id="benchmark-breakdown" class="benchmark-breakdown hidden"></div>
+          <details id="benchmark-examples-details" class="benchmark-examples"><summary id="benchmark-examples-summary">View representative prompts and classifications</summary><div id="benchmark-examples" class="benchmark-example-list"><p>Run the benchmark to show sample cases, misclassifications, and detected categories.</p></div></details>
+        </section>
+
+        <section id="audit" class="panel audit-panel">
+          <div class="panel-heading"><div><div class="section-kicker">PRIVACY-AWARE TELEMETRY</div><h2>Recent security events</h2><p>Metadata only—no prompt bodies, matched values, or model responses are retained.</p></div><span class="audit-badge"><span class="audit-lock">⌑</span> CONTENT-FREE LOG</span></div>
+          <div class="table-wrap"><table><thead><tr><th>EVENT</th><th>IDENTITY</th><th>DETECTION</th><th>POLICY ACTION</th><th>OUTCOME</th><th>TIME</th></tr></thead><tbody id="audit-rows"><tr><td colspan="6" class="empty-row">No events yet. Try a scenario to see privacy-safe telemetry.</td></tr></tbody></table></div>
+        </section>
+
+        <footer class="page-footer"><span>SANRAKSH SECURITY GATEWAY <span class="footer-dot">·</span> LOCAL-FIRST DEMO</span><span>Inspect first. Trust with evidence.</span></footer>
+      </div>
+    </main>
+  </div>
+  <div id="login-overlay" class="login-overlay hidden"><form id="login-form" class="login-card"><img class="login-brand" src="/assets/sanraksh-logo-trim.png" alt="Sanraksh AI Security Gateway"><div class="section-kicker">SECURE WORKSPACE</div><h2>Sign in to your gateway</h2><p>Use an account configured by your deployment administrator.</p><label for="login-user">Username</label><input id="login-user" autocomplete="username" required><label for="login-password">Password</label><input id="login-password" type="password" autocomplete="current-password" required><div id="login-error" class="login-error"></div><button class="button button-primary" type="submit">Sign in <span>→</span></button><small>Hosted accounts are authenticated by the gateway server.</small></form></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
