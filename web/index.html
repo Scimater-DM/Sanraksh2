@@ -223,9 +223,9 @@
       <div class="section-kicker">CHOOSE YOUR WORKSPACE</div><h2>How will you use Sanraksh?</h2>
       <p>Choose the protected experience that matches your needs.</p>
       <button id="private-mode-button" class="mode-choice" type="button"><span class="mode-choice-icon">▣</span><span><strong>Private · Professional</strong><small>For an organization workspace with role-based document access and managed policies.</small></span><b>→</b></button>
-      <button id="public-mode-button" class="mode-choice" type="button"><span class="mode-choice-icon">◉</span><span><strong>Public · Personal</strong><small>A private personal account for individuals protecting their own prompts and files.</small></span><b>→</b></button>
+      <button id="public-mode-button" class="mode-choice" type="button"><span class="mode-choice-icon">◉</span><span><strong>Public · Personal</strong><small>Protect personal prompts and files with a sign-in or temporary demo account.</small></span><b>→</b></button>
       <p id="public-mode-status" class="mode-status" role="status"></p>
-      <small>Personal accounts are currently available in the local demo only. Hosted sign-up will be enabled after durable account storage is configured.</small>
+      <small>Hosted personal sign-up needs durable account storage. Public demo deployments can offer a temporary personal demo account.</small>
     </section>
     <form id="login-form" class="login-card hidden">
       <button class="login-back" data-back-to-modes type="button">← Choose a workspace</button>
@@ -277,7 +277,7 @@
       <button class="login-back" data-back-to-modes type="button">← Choose a workspace</button>
       <img class="login-brand centered-login-brand" src="/assets/sanraksh-logo-trim.png" alt="Sanraksh AI Security Gateway">
       <div class="section-kicker">PUBLIC · PERSONAL</div><h2 id="personal-account-title">Your personal protection</h2>
-      <div class="account-tabs"><button id="personal-signin-tab" class="account-tab selected" type="button">Sign in</button><button id="personal-register-tab" class="account-tab" type="button">Create account</button></div>
+      <div id="personal-account-tabs" class="account-tabs"><button id="personal-signin-tab" class="account-tab selected" type="button">Sign in</button><button id="personal-register-tab" class="account-tab" type="button">Create account</button></div>
       <form id="personal-login-form">
         <label for="personal-login-email">Email</label><input id="personal-login-email" type="email" autocomplete="email" required>
         <label for="personal-login-password">Password</label><input id="personal-login-password" type="password" autocomplete="current-password" required>
@@ -292,7 +292,7 @@
         <label for="personal-register-password">Password <small>At least 12 characters</small></label><input id="personal-register-password" type="password" autocomplete="new-password" minlength="12" required>
         <div id="personal-register-error" class="login-error"></div><button class="button button-primary" type="submit">Create personal account <span>→</span></button>
       </form>
-      <small>Local demo only: accounts, settings, and audit metadata are held in server memory and reset when the server restarts. Do not use real credentials or sensitive documents.</small>
+      <small id="personal-account-note">Demo accounts, settings, and audit metadata are temporary and held in server memory. Do not use real credentials or sensitive documents.</small>
     </section>
   </div>
   <script src="/app.js" defer></script>

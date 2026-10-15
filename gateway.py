@@ -728,22 +728,18 @@ class GatewayHandler(BaseHTTPRequestHandler):
             payload = self._body()
             path = urlparse(self.path).path
             if path == "/api/personal/demo-login":
-                if not PUBLIC_SIGNUP_ENABLED:
+                if not (PUBLIC_SIGNUP_ENABLED or PUBLIC_DEMO):
                     self._json(
                         503,
                         {"error": "Personal demo sign-in is not available on this hosted deployment."},
                     )
                     return
-                user_id = "personal-demo"
+                user_id = "personal-demo-" + uuid4().hex
                 with SESSION_LOCK:
-                    PERSONAL_USERS.setdefault(
-                        user_id,
-                        {
-                            "name": "Personal Demo Account",
-                            "email": "demo@sanraksh.local",
-                            "role": "personal",
-                        },
-                    )
+                    PERSONAL_USERS[user_id] = {
+                        "name": "Personal Demo Account",
+                        "role": "personal",
+                    }
                 self._start_session(user_id)
                 return
             if path in {

@@ -190,7 +190,7 @@ class GatewayInspectionTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(state["mode"], "personal")
             self.assertEqual(
-                state["users"]["personal-demo"]["name"], "Personal Demo Account"
+                state["users"][state["current_user"]]["name"], "Personal Demo Account"
             )
             status, result = self.request(
                 "/api/personal/demo-login",
@@ -200,19 +200,74 @@ class GatewayInspectionTests(unittest.TestCase):
             self.assertEqual(status, 200)
         finally:
             with gateway.SESSION_LOCK:
-                gateway.PERSONAL_USERS.pop("personal-demo", None)
+                demo_users = {
+                    user_id for user_id in gateway.PERSONAL_USERS
+                    if user_id.startswith("personal-demo-")
+                }
+                for user_id in demo_users:
+                    gateway.PERSONAL_USERS.pop(user_id, None)
                 for token, user_id in list(gateway.SESSIONS.items()):
-                    if user_id == "personal-demo":
+                    if user_id in demo_users:
                         gateway.SESSIONS.pop(token)
             with gateway.STATE.lock:
-                gateway.STATE.personal_events.pop("personal-demo", None)
-                gateway.STATE.personal_policies.pop("personal-demo", None)
+                for user_id in demo_users:
+                    gateway.STATE.personal_events.pop(user_id, None)
+                    gateway.STATE.personal_policies.pop(user_id, None)
 
     def test_personal_demo_login_is_disabled_with_public_signup(self):
-        with patch.object(gateway, "PUBLIC_SIGNUP_ENABLED", False):
+        with (
+            patch.object(gateway, "PUBLIC_SIGNUP_ENABLED", False),
+            patch.object(gateway, "PUBLIC_DEMO", False),
+        ):
             status, result = self.request("/api/personal/demo-login", {})
         self.assertEqual(status, 503)
         self.assertIn("not available", result["error"])
+
+    def test_hosted_personal_demo_login_is_enabled_and_isolated_per_visit(self):
+        cookies = []
+        user_ids = []
+        with (
+            patch.object(gateway, "PUBLIC_SIGNUP_ENABLED", False),
+            patch.object(gateway, "PUBLIC_DEMO", True),
+        ):
+            try:
+                for _ in range(2):
+                    request = Request(
+                        self.base_url + "/api/personal/demo-login",
+                        data=b"{}",
+                        headers={"Content-Type": "application/json"},
+                    )
+                    with urlopen(request) as response:
+                        cookies.append(response.headers["Set-Cookie"].split(";", 1)[0])
+                    status, state = self.request(
+                        "/api/state", extra_headers={"Cookie": cookies[-1]}
+                    )
+                    self.assertEqual(status, 200)
+                    self.assertEqual(state["mode"], "personal")
+                    user_ids.append(state["current_user"])
+                self.assertNotEqual(user_ids[0], user_ids[1])
+                for user_id in user_ids:
+                    self.assertIn(user_id, gateway.PERSONAL_USERS)
+                status, _ = self.request(
+                    "/api/personal/register",
+                    {
+                        "name": "Hosted User",
+                        "email": "hosted@example.test",
+                        "password": "LongEnoughPass123!",
+                    },
+                )
+                self.assertEqual(status, 503)
+            finally:
+                with gateway.SESSION_LOCK:
+                    for user_id in user_ids:
+                        gateway.PERSONAL_USERS.pop(user_id, None)
+                    for token, user_id in list(gateway.SESSIONS.items()):
+                        if user_id in user_ids:
+                            gateway.SESSIONS.pop(token)
+                with gateway.STATE.lock:
+                    for user_id in user_ids:
+                        gateway.STATE.personal_events.pop(user_id, None)
+                        gateway.STATE.personal_policies.pop(user_id, None)
 
     def test_local_professional_demo_account_signup_login_and_session(self):
         self.assertFalse(gateway.AUTH_REQUIRED)

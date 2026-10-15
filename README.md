@@ -23,7 +23,7 @@ In **Live request inspection**, any signed-in user can attach one PDF, DOCX, TXT
 ## Deploy on Render
 
 1. Create a new **Blueprint** in Render and select this repository. Render reads `render.yaml`.
-2. By default, a Render deployment without `GATEWAY_USERS_JSON` starts in **public demo mode** with no sign-in. Anyone who visits can use the fictional demo identities and shared in-memory demo data. Do not upload real documents or enter real sensitive information in this mode. To require sign-in instead, add `GATEWAY_USERS_JSON` as a Render secret. It must contain at least one account. Generate a PBKDF2 password hash locally with `python gateway.py --hash-password`, then use the resulting hash in the JSON, for example:
+2. By default, a Render deployment without `GATEWAY_USERS_JSON` starts in **public demo mode** with no sign-in. Visitors can use the fictional professional identities or create a temporary, per-visit personal demo account; hosted personal account registration and persistent sign-in remain disabled until durable storage is configured. Demo state is in memory and may reset when the server restarts. Anyone can access this demo, so do not upload real documents or enter real sensitive information. To require sign-in instead, add `GATEWAY_USERS_JSON` as a Render secret. It must contain at least one account. Generate a PBKDF2 password hash locally with `python gateway.py --hash-password`, then use the resulting hash in the JSON, for example:
 
    ```json
    {

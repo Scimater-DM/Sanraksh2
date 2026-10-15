@@ -134,6 +134,7 @@ const CATEGORY_COLORS = {
 let currentState = null;
 let currentUser = localStorage.getItem("sanraksh-demo-user") || "ananya";
 let publicSignupEnabled = false;
+let hostedPublicDemo = false;
 let hostedAuthRequired = false;
 let benchmarkCases = null;
 let gameRound = 0;
@@ -170,9 +171,12 @@ function showLogin(message = "") {
   document.getElementById("public-mode-status").textContent = message || (
     publicSignupEnabled
       ? "Personal sign-up is local-only in this demo; accounts reset when the server restarts."
+      : hostedPublicDemo
+        ? "Try a temporary personal demo account. Account data is isolated per visit and cleared when the server restarts; sign-up is disabled."
       : "Hosted personal sign-up is disabled until durable account storage is configured."
   );
-  document.getElementById("public-mode-button").disabled = !publicSignupEnabled;
+  document.getElementById("public-mode-button").disabled =
+    !(publicSignupEnabled || hostedPublicDemo);
 }
 
 function showLoginPanel(id) {
@@ -985,13 +989,24 @@ async function init() {
     }
   });
   document.getElementById("public-mode-button").addEventListener("click", () => {
-    if (!publicSignupEnabled) {
+    if (!publicSignupEnabled && !hostedPublicDemo) {
       document.getElementById("public-mode-status").textContent =
         "Personal sign-up is disabled on this hosted deployment until durable account storage is configured.";
       return;
     }
     document.getElementById("personal-login-error").textContent = "";
     document.getElementById("personal-register-error").textContent = "";
+    document.getElementById("personal-login-form").classList.toggle("hidden", hostedPublicDemo);
+    document.getElementById("personal-register-form").classList.add("hidden");
+    document.getElementById("personal-account-tabs").classList.toggle("hidden", hostedPublicDemo);
+    document.getElementById("personal-signin-tab").classList.toggle("hidden", hostedPublicDemo);
+    document.getElementById("personal-register-tab").classList.toggle("hidden", hostedPublicDemo);
+    document.getElementById("personal-demo-entry").classList.remove("hidden");
+    document.getElementById("personal-account-title").textContent =
+      hostedPublicDemo ? "Explore personal protection" : "Your personal protection";
+    document.getElementById("personal-account-note").textContent = hostedPublicDemo
+      ? "A temporary personal demo account is created for this visit. Its settings and audit metadata are held in server memory and reset when the server restarts. Do not use real credentials or sensitive documents."
+      : "Demo accounts, settings, and audit metadata are temporary and held in server memory. Do not use real credentials or sensitive documents.";
     showLoginPanel("personal-account-card");
   });
   document.querySelectorAll("[data-back-to-modes]").forEach(button =>
@@ -1120,11 +1135,17 @@ async function init() {
     const health = await api("/api/health");
     hostedAuthRequired = health.auth_required === true;
     publicSignupEnabled = health.public_signup_enabled === true;
-    document.getElementById("public-mode-button").disabled = !publicSignupEnabled;
+    hostedPublicDemo = health.public_demo === true;
+    document.getElementById("public-mode-button").disabled =
+      !(publicSignupEnabled || hostedPublicDemo);
     document.getElementById("public-mode-status").textContent = publicSignupEnabled
       ? "Personal sign-up is local-only in this demo; accounts reset when the server restarts."
-      : "Hosted personal sign-up is disabled until durable account storage is configured.";
-    document.getElementById("personal-demo-entry").classList.toggle("hidden", !publicSignupEnabled);
+      : hostedPublicDemo
+        ? "Try a temporary personal demo account. Account data is isolated per visit and cleared when the server restarts; sign-up is disabled."
+        : "Hosted personal sign-up is disabled until durable account storage is configured.";
+    document.getElementById("personal-demo-entry").classList.toggle(
+      "hidden", !(publicSignupEnabled || hostedPublicDemo)
+    );
     await refresh();
     if (
       currentState.public_demo
