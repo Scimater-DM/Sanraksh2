@@ -262,6 +262,13 @@ function render(state) {
       "Choose what happens when a category is detected. Changes take effect immediately.";
   }
   const events = state.events || [];
+  const hasDemoEvents = state.demo_data === true;
+  document.querySelector(".signals-panel .panel-heading p").textContent = hasDemoEvents
+    ? "Synthetic presentation examples are included; DEMO rows are not live incidents."
+    : "Flagged categories from this session.";
+  document.querySelector("#audit .panel-heading p").textContent = hasDemoEvents
+    ? "Synthetic examples are marked DEMO. No prompt bodies, matched values, or model responses are retained."
+    : "Metadata only—no prompt bodies, matched values, or model responses are retained.";
   const blocked = events.filter(event =>
     event.action === "block" || /blocked|denied|withheld/i.test(event.outcome)
   ).length;
@@ -366,7 +373,7 @@ function renderAudit(events) {
     const blocked = action === "block" || /blocked|denied|withheld/i.test(event.outcome);
     const timestamp = new Date(event.time).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
     return `<tr>
-      <td class="event-id">EVT-${escapeHTML(event.id.slice(0, 6).toUpperCase())}</td>
+      <td class="event-id">EVT-${escapeHTML(event.id.slice(0, 6).toUpperCase())}${event.demo ? ' <span class="demo-event-label">DEMO</span>' : ""}</td>
       <td>${escapeHTML(event.user)} <span class="muted">· ${escapeHTML(event.role)}</span></td>
       <td>${categories}</td>
       <td><span class="action-label ${escapeHTML(action)}">${escapeHTML(action)}</span></td>

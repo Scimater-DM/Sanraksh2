@@ -350,6 +350,7 @@ tbody tr:last-child td{border-bottom:0}
 .outcome-dot.block{background:var(--red)}
 .empty-row{text-align:center!important;color:#71818b;padding:20px!important}
 .page-footer{display:flex;justify-content:space-between;padding:12px 2px 0;color:#566672;font:8px var(--mono);letter-spacing:.35px}
+.demo-event-label{display:inline-block;margin-left:4px;padding:1px 3px;border:1px solid #3c5b50;border-radius:3px;color:#88d6b1;font:7px var(--mono);letter-spacing:.3px;vertical-align:1px}
 .footer-dot{padding:0 5px;color:#397d68}
 .login-overlay{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:#080d12eF;backdrop-filter:blur(8px)}
 .login-card{width:min(380px,calc(100vw - 32px));padding:27px;border:1px solid #304149;border-radius:12px;background:#121d25;box-shadow:0 20px 70px #0008}

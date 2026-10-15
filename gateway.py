@@ -17,7 +17,7 @@ import time
 import urllib.error
 import urllib.request
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.cookies import SimpleCookie
 from getpass import getpass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -286,6 +286,40 @@ class GatewayState:
 
 
 STATE = GatewayState()
+DEMO_PRESENTATION_EVENTS = [
+    (5.2, ["aadhaar"], "mask", "synthetic identifier masked"),
+    (4.6, ["pan", "financial"], "redact", "synthetic financial details redacted"),
+    (3.9, ["phone"], "mask", "synthetic phone number masked"),
+    (3.3, ["credentials"], "block", "synthetic credential request blocked"),
+    (2.7, ["prompt_injection"], "block", "synthetic extraction attempt blocked"),
+    (2.1, ["confidential"], "block", "synthetic confidential content withheld"),
+    (1.5, ["restricted_data"], "block", "synthetic unauthorized retrieval denied"),
+    (0.9, ["aadhaar", "phone"], "mask", "synthetic personal data masked"),
+    (0.3, ["financial"], "redact", "synthetic financial detail redacted"),
+]
+
+
+def _demo_events(user: str, role: str, *, personal: bool = False) -> list[dict]:
+    now = datetime.now(timezone.utc)
+    events = []
+    for hours_ago, categories, action, outcome in DEMO_PRESENTATION_EVENTS:
+        if personal and "restricted_data" in categories:
+            continue
+        events.append({
+            "id": str(uuid4()),
+            "time": (now - timedelta(hours=hours_ago)).isoformat(),
+            "user": user,
+            "role": role,
+            "categories": categories.copy(),
+            "action": action,
+            "outcome": outcome,
+            "demo": True,
+        })
+    return events
+
+
+if not AUTH_REQUIRED:
+    STATE.events.extend(_demo_events("Demo workspace", "analyst"))
 
 
 def _luhn(value: str) -> bool:
@@ -641,6 +675,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 200,
                 {
                     "events": events[:50],
+                    "demo_data": any(event.get("demo") for event in events),
                     "policies": policies,
                     "approvals": approvals,
                     "categories": dict(counts),
@@ -740,6 +775,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
                         "name": "Personal Demo Account",
                         "role": "personal",
                     }
+                with STATE.lock:
+                    STATE.personal_events[user_id] = _demo_events(
+                        "Personal Demo", "personal", personal=True
+                    )
                 self._start_session(user_id)
                 return
             if path in {

@@ -66,6 +66,15 @@ class GatewayInspectionTests(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertIn("error", result)
 
+    def test_demo_dashboard_has_synthetic_graph_data_without_prompt_content(self):
+        status, state = self.request("/api/state")
+        self.assertEqual(status, 200)
+        self.assertTrue(state["demo_data"])
+        self.assertTrue(any(event.get("demo") for event in state["events"]))
+        self.assertGreater(sum(state["categories"].values()), 0)
+        self.assertTrue(any(state["activity"]))
+        self.assertTrue(all("text" not in event for event in state["events"]))
+
     def test_local_personal_accounts_are_isolated_from_professional_workspace(self):
         self.assertTrue(gateway.PUBLIC_SIGNUP_ENABLED)
         email = f"personal-{gateway.uuid4().hex}@example.test"
@@ -245,6 +254,10 @@ class GatewayInspectionTests(unittest.TestCase):
                     self.assertEqual(status, 200)
                     self.assertEqual(state["mode"], "personal")
                     user_ids.append(state["current_user"])
+                    self.assertTrue(state["demo_data"])
+                    self.assertTrue(any(state["activity"]))
+                    self.assertGreater(sum(state["categories"].values()), 0)
+                    self.assertTrue(all(event["demo"] for event in state["events"]))
                 self.assertNotEqual(user_ids[0], user_ids[1])
                 for user_id in user_ids:
                     self.assertIn(user_id, gateway.PERSONAL_USERS)
