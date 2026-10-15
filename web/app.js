@@ -208,7 +208,8 @@ function render(state) {
     document.getElementById("identity-picker").classList.remove("hidden");
     document.getElementById("secure-identity").classList.add("hidden");
     document.getElementById("logout-button").classList.add("hidden");
-    document.getElementById("environment-label").textContent = "LOCAL DEMO";
+    document.getElementById("environment-label").textContent = state.public_demo
+      ? "PUBLIC DEMO" : "LOCAL DEMO";
     const select = document.getElementById("identity-select");
     select.innerHTML = Object.entries(users).map(([id, user]) =>
       `<option value="${escapeHTML(id)}">${escapeHTML(user.name)} · ${escapeHTML(user.role)}</option>`
@@ -1125,7 +1126,11 @@ async function init() {
       : "Hosted personal sign-up is disabled until durable account storage is configured.";
     document.getElementById("personal-demo-entry").classList.toggle("hidden", !publicSignupEnabled);
     await refresh();
-    if (currentState.mode === "personal" || (currentState.auth_required && currentState.current_user)) {
+    if (
+      currentState.public_demo
+      || currentState.mode === "personal"
+      || (currentState.auth_required && currentState.current_user)
+    ) {
       document.getElementById("login-overlay").classList.add("hidden");
     } else {
       showLogin();

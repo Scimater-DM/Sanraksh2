@@ -2,6 +2,7 @@ import base64
 import io
 import json
 import hashlib
+import os
 import threading
 import unittest
 from pathlib import Path
@@ -271,7 +272,7 @@ class GatewayInspectionTests(unittest.TestCase):
                 gateway.USERS.pop(user_id, None)
 
     def test_professional_demo_signup_is_disabled_for_hosted_deployment(self):
-        with patch.object(gateway, "AUTH_REQUIRED", True):
+        with patch.object(gateway, "HOSTED", True):
             status, result = self.request(
                 "/api/professional/demo-register",
                 {
@@ -283,6 +284,33 @@ class GatewayInspectionTests(unittest.TestCase):
             )
         self.assertEqual(status, 503)
         self.assertIn("hosted deployments", result["error"])
+
+    def test_render_without_hosted_users_does_not_fail_startup(self):
+        original_users = gateway.USERS
+        try:
+            with patch.dict(os.environ, {"RENDER": "true"}, clear=False):
+                os.environ.pop("GATEWAY_USERS_JSON", None)
+                gateway.USERS = {
+                    "ananya": {"name": "Ananya Sharma", "role": "analyst"}
+                }
+                gateway.load_hosted_users()
+                self.assertIn("ananya", gateway.USERS)
+        finally:
+            gateway.USERS = original_users
+
+    def test_hosted_public_demo_is_accessible_without_sign_in(self):
+        with (
+            patch.object(gateway, "AUTH_REQUIRED", False),
+            patch.object(gateway, "PUBLIC_DEMO", True),
+        ):
+            status, health = self.request("/api/health")
+            self.assertEqual(status, 200)
+            self.assertFalse(health["auth_required"])
+            self.assertTrue(health["public_demo"])
+            status, state = self.request("/api/state")
+        self.assertEqual(status, 200)
+        self.assertTrue(state["public_demo"])
+        self.assertEqual(state["current_user"], "ananya")
 
     def test_core_detection_benchmark_has_no_missed_or_false_positive_cases(self):
         missed = []

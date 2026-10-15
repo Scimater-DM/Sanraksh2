@@ -23,7 +23,7 @@ In **Live request inspection**, any signed-in user can attach one PDF, DOCX, TXT
 ## Deploy on Render
 
 1. Create a new **Blueprint** in Render and select this repository. Render reads `render.yaml`.
-2. Set the `GATEWAY_USERS_JSON` secret when prompted. It must contain at least one account. Generate a PBKDF2 password hash locally with `python gateway.py --hash-password`, then use the resulting hash in the JSON, for example:
+2. By default, a Render deployment without `GATEWAY_USERS_JSON` starts in **public demo mode** with no sign-in. Anyone who visits can use the fictional demo identities and shared in-memory demo data. Do not upload real documents or enter real sensitive information in this mode. To require sign-in instead, add `GATEWAY_USERS_JSON` as a Render secret. It must contain at least one account. Generate a PBKDF2 password hash locally with `python gateway.py --hash-password`, then use the resulting hash in the JSON, for example:
 
    ```json
    {
@@ -41,9 +41,9 @@ In **Live request inspection**, any signed-in user can attach one PDF, DOCX, TXT
    ```
 
 3. Set `LLM_API_KEY` as a Render secret. The blueprint configures the OpenAI-compatible endpoint and `gpt-4o-mini` by default. `LLM_BASE_URL` and `LLM_MODEL` can be changed for another compatible hosted endpoint. Keep provider credentials in Render's environment settings; never put them in the repository or browser.
-4. Deploy. Render provides `PORT`; the service binds to `0.0.0.0` in its hosted environment. `/api/health` is the unauthenticated health check. The dashboard and its API use the authenticated, secure, HTTP-only session cookie.
+4. Deploy. Render provides `PORT`; the service binds to `0.0.0.0` in its hosted environment. `/api/health` is the unauthenticated health check. When `GATEWAY_USERS_JSON` is configured, the dashboard and its API use the authenticated, secure, HTTP-only session cookie.
 
-The gateway refuses to start on Render without `GATEWAY_USERS_JSON`. Hosted professional accounts are password-authenticated; the local identity selector is only a local demonstration and must not be treated as authentication. Hosted public/personal sign-up returns unavailable until a durable account database is selected and configured. Only hosted admins may change organization-wide policies; managers and admins may review held requests.
+With hosted authentication enabled, professional accounts are password-authenticated; the local identity selector is only a local demonstration and must not be treated as authentication. Hosted public/personal sign-up returns unavailable until a durable account database is selected and configured. Only hosted admins may change organization-wide policies; managers and admins may review held requests.
 
 If you already created a Render **Project** named Sanraksh, open that project and add a **Blueprint** from the connected GitHub repository; Render will read this repository's `render.yaml` and add the service to the project. Alternatively, create a **Web Service** in that project and connect the same repository, using the build, start, and health-check settings shown above. The Blueprint names the service `sanraksh-ai-security-gateway`.
 

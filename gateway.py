@@ -41,8 +41,10 @@ USERS = {
     "rohan": {"name": "Rohan Mehta", "role": "manager"},
     "priya": {"name": "Priya Nair", "role": "admin"},
 }
-AUTH_REQUIRED = bool(os.environ.get("RENDER") or os.environ.get("GATEWAY_USERS_JSON"))
-PUBLIC_SIGNUP_ENABLED = not AUTH_REQUIRED
+HOSTED = bool(os.environ.get("RENDER"))
+AUTH_REQUIRED = bool(os.environ.get("GATEWAY_USERS_JSON"))
+PUBLIC_DEMO = HOSTED and not AUTH_REQUIRED
+PUBLIC_SIGNUP_ENABLED = not HOSTED and not AUTH_REQUIRED
 PERSONAL_USERS: dict[str, dict] = {}
 SESSIONS: dict[str, str] = {}
 SESSION_LOCK = threading.Lock()
@@ -56,8 +58,6 @@ def load_hosted_users() -> None:
     global USERS
     configuration = os.environ.get("GATEWAY_USERS_JSON")
     if not configuration:
-        if os.environ.get("RENDER"):
-            raise RuntimeError("Set GATEWAY_USERS_JSON to enable authenticated hosted accounts.")
         return
     try:
         loaded = json.loads(configuration)
@@ -594,6 +594,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     "status": "ok",
                     "auth_required": AUTH_REQUIRED,
                     "public_signup_enabled": PUBLIC_SIGNUP_ENABLED,
+                    "public_demo": PUBLIC_DEMO,
                 },
             )
             return
@@ -653,6 +654,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     ),
                     "mode": "personal" if account["role"] == "personal" else "professional",
                     "public_signup_enabled": PUBLIC_SIGNUP_ENABLED,
+                    "public_demo": PUBLIC_DEMO,
                     "model": {
                         "configured": bool(os.environ.get("LLM_BASE_URL") and os.environ.get("LLM_MODEL")),
                         "name": os.environ.get("LLM_MODEL", "") or "Safe simulation",
@@ -748,7 +750,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 "/api/professional/demo-register",
                 "/api/professional/demo-login",
             }:
-                if AUTH_REQUIRED:
+                if HOSTED:
                     self._json(
                         503,
                         {"error": "Professional demo accounts are unavailable on hosted deployments."},
