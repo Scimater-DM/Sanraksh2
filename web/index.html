@@ -115,6 +115,10 @@
           <section class="panel signals-panel">
             <div class="panel-heading"><div><div class="section-kicker">THREAT SIGNALS</div><h2>What we catch</h2><p>Flagged categories from this session.</p></div><span class="subtle-link">8 controls</span></div>
             <div id="category-list" class="category-list"></div>
+            <div class="demo-activity">
+              <button id="demo-activity-button" class="button button-secondary" type="button">Load synthetic demo activity <span>↗</span></button>
+              <p id="demo-activity-status" role="status">Uses fake values and the test document to show category counts. Policy-processed prompts may reach your configured model; blocked items do not.</p>
+            </div>
             <div class="signals-note"><span>✳</span><p>Pattern detection is a fast first layer. Tune policies to match your data and risk tolerance.</p></div>
             <div class="activity-trend"><div class="trend-heading"><span>REQUEST ACTIVITY</span><span>LAST 6 HOURS</span></div><div id="activity-chart" class="activity-chart" role="img" aria-label="Gateway requests per hour over the last six hours"></div></div>
           </section>
@@ -122,7 +126,23 @@
 
         <section id="access" class="panel access-panel">
           <div class="panel-heading"><div><div class="section-kicker">RETRIEVAL ACCESS CONTROL</div><h2>Knowledge, scoped to identity</h2><p>Every document is filtered on the server before it can reach an AI context.</p></div><div class="role-tag"><span class="role-dot"></span><span id="access-role">Analyst</span> access</div></div>
-          <div class="access-layout"><div class="doc-list-wrap"><div class="subheading">DOCUMENTS AVAILABLE TO YOU <span id="doc-count">0</span></div><div id="document-list" class="document-list"></div></div><div class="retrieval-test"><div class="subheading">TEST A RETRIEVAL</div><p>Ask for a document by name. Unauthorized sources are denied on the server.</p><div class="retrieve-form"><input id="retrieve-input" value="payroll-master restricted payroll register" aria-label="Document retrieval query"><button id="retrieve-button" class="button button-secondary">Check access</button></div><div id="retrieve-result" class="retrieve-result">Ready to verify document permissions.</div><div class="access-foot"><span>◈</span> Role comes from the authenticated session—not the prompt.</div></div></div>
+          <div class="access-layout"><div class="doc-list-wrap"><div class="subheading">DOCUMENTS AVAILABLE TO YOU <span id="doc-count">0</span></div><div id="document-list" class="document-list"></div>
+            <form id="document-upload" class="document-upload hidden">
+              <div class="subheading">ADD A TEXT DOCUMENT <span>ADMIN</span></div>
+              <label for="document-file">Choose a .txt or .md file <small>Up to 100 KB · plain text only</small></label>
+              <input id="document-file" type="file" accept=".txt,.md,text/plain,text/markdown" required>
+              <label for="document-title">Document title</label>
+              <input id="document-title" type="text" maxlength="120" placeholder="e.g. Travel reimbursement policy" required>
+              <fieldset><legend>Who can retrieve it?</legend>
+                <label><input type="checkbox" name="document-role" value="analyst" checked> Analyst</label>
+                <label><input type="checkbox" name="document-role" value="manager" checked> Manager</label>
+                <label><input type="checkbox" name="document-role" value="admin" checked> Admin</label>
+              </fieldset>
+              <button id="document-upload-button" class="button button-secondary" type="submit">Add document <span>＋</span></button>
+              <p id="document-upload-status" role="status">Stored in server memory for this demo; documents are removed when the server restarts. Do not upload real confidential records.</p>
+            </form>
+            <div class="document-source-note"><strong>Demo documents live in <code>gateway.py</code> → <code>DOCUMENTS</code>.</strong><span>Each entry has sample content and role permissions. Connect your company’s approved document store and its existing access rules before using real records.</span></div></div><div class="retrieval-test"><div class="subheading">TEST A RETRIEVAL</div><p>Ask for a document by name. Unauthorized sources are denied on the server.</p><div class="retrieve-form"><input id="retrieve-input" value="payroll-master restricted payroll register" aria-label="Document retrieval query"><button id="retrieve-button" class="button button-secondary">Check access</button></div><div id="retrieve-result" class="retrieve-result">Ready to verify document permissions.</div><div class="access-foot"><span>◈</span> Role comes from the authenticated session—not the prompt.</div></div></div>
+          <div class="company-ai-flow"><div class="subheading">HOW A COMPANY USES IT</div><div class="company-ai-steps"><span><b>1</b> Staff asks for help with an approved task</span><i>→</i><span><b>2</b> Sanraksh checks the prompt and document permissions</span><i>→</i><span><b>3</b> The model drafts, summarizes, or answers from authorized sources</span><i>→</i><span><b>4</b> The response is checked before it returns</span></div><p>Use the model for routine knowledge work; keep approvals and people in control of consequential decisions.</p></div>
         </section>
 
         <section id="policies" class="panel policy-panel">
