@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: sanraksh-ai-security-gateway
+    runtime: python
+    buildCommand: python -m pip install -r requirements.txt && python -m compileall -q gateway.py
+    startCommand: python gateway.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: GATEWAY_USERS_JSON
+        sync: false
+      - key: LLM_BASE_URL
+        value: https://api.openai.com/v1
+      - key: LLM_MODEL
+        value: gpt-4o-mini
+      - key: LLM_API_KEY
+        sync: false
