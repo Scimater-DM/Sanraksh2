@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import base64
+import io
+import zipfile
 import hashlib
 import hmac
 import secrets
@@ -21,17 +24,26 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
+from docx.opc.exceptions import PackageNotFoundError
+from docx import Document as WordDocument
+from lxml.etree import XMLSyntaxError
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError, PdfStreamError
 
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
-MAX_BODY = 1_000_000
+MAX_BODY = 3_000_000
+MAX_PRIVATE_FILE_BYTES = 2_000_000
+MAX_PRIVATE_TEXT_CHARS = 100_000
 USERS = {
     "ananya": {"name": "Ananya Sharma", "role": "analyst"},
     "rohan": {"name": "Rohan Mehta", "role": "manager"},
     "priya": {"name": "Priya Nair", "role": "admin"},
 }
 AUTH_REQUIRED = bool(os.environ.get("RENDER") or os.environ.get("GATEWAY_USERS_JSON"))
+PUBLIC_SIGNUP_ENABLED = not AUTH_REQUIRED
+PERSONAL_USERS: dict[str, dict] = {}
 SESSIONS: dict[str, str] = {}
 SESSION_LOCK = threading.Lock()
 
@@ -94,6 +106,16 @@ def verify_password(password: str, encoded: str) -> bool:
         return hmac.compare_digest(actual, expected)
     except (ValueError, TypeError):
         return False
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 600_000).hex()
+    return f"pbkdf2_sha256$600000${salt.hex()}${digest}"
+
+
+def _account(user_id: str) -> dict:
+    return PERSONAL_USERS.get(user_id) or USERS[user_id]
 DOCUMENTS = [
     {
         "id": "public-handbook",
@@ -228,20 +250,39 @@ class GatewayState:
         self.policies = DEFAULT_POLICIES.copy()
         self.events: list[dict] = []
         self.approvals: dict[str, dict] = {}
+        self.personal_policies: dict[str, dict[str, str]] = {}
+        self.personal_events: dict[str, list[dict]] = {}
 
     def log(self, user_id: str, categories: list[str], action: str, outcome: str) -> None:
+        account = _account(user_id)
         event = {
             "id": str(uuid4()),
             "time": datetime.now(timezone.utc).isoformat(),
-            "user": USERS[user_id]["name"],
-            "role": USERS[user_id]["role"],
+            "user": account["name"],
+            "role": account["role"],
             "categories": categories,
             "action": action,
             "outcome": outcome,
         }
         with self.lock:
-            self.events.insert(0, event)
-            del self.events[200:]
+            if user_id in PERSONAL_USERS:
+                events = self.personal_events.setdefault(user_id, [])
+            else:
+                events = self.events
+            events.insert(0, event)
+            del events[200:]
+
+    def policies_for(self, user_id: str) -> dict[str, str]:
+        with self.lock:
+            if user_id in PERSONAL_USERS:
+                return self.personal_policies.setdefault(user_id, DEFAULT_POLICIES.copy()).copy()
+            return self.policies.copy()
+
+    def events_for(self, user_id: str) -> list[dict]:
+        with self.lock:
+            if user_id in PERSONAL_USERS:
+                return list(self.personal_events.get(user_id, []))
+            return list(self.events)
 
 
 STATE = GatewayState()
@@ -323,8 +364,99 @@ def _tokens(text: str) -> set[str]:
     }
 
 
+def _docx_container_text(container) -> list[str]:
+    parts = [paragraph.text for paragraph in container.paragraphs if paragraph.text]
+    for table in container.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                parts.extend(_docx_container_text(cell))
+    return parts
+
+
+def _extract_private_attachment(attachment: object) -> tuple[str, str]:
+    if not isinstance(attachment, dict):
+        raise ValueError("Attachment must include a filename and base64 data.")
+    name = attachment.get("name")
+    encoded = attachment.get("data")
+    if (
+        not isinstance(name, str)
+        or not name.strip()
+        or len(name) > 255
+        or "/" in name
+        or "\\" in name
+        or any(ord(character) < 32 for character in name)
+        or not isinstance(encoded, str)
+    ):
+        raise ValueError("Attachment must have a valid filename and base64 data.")
+    extension = Path(name).suffix.lower()
+    if extension not in {".txt", ".md", ".pdf", ".docx"}:
+        raise ValueError("Choose a PDF, DOCX, TXT, or Markdown file.")
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except (ValueError, base64.binascii.Error) as error:
+        raise ValueError("The selected file could not be read. Please choose it again.") from error
+    if not data or len(data) > MAX_PRIVATE_FILE_BYTES:
+        raise ValueError("The selected file must be non-empty and no larger than 2 MB.")
+
+    if extension in {".txt", ".md"}:
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError as error:
+            raise ValueError("Text files must use UTF-8 encoding.") from error
+        if "\x00" in text:
+            raise ValueError("The selected file is not plain text.")
+    elif extension == ".pdf":
+        if not data.startswith(b"%PDF-"):
+            raise ValueError("The selected file does not appear to be a valid PDF.")
+        try:
+            reader = PdfReader(io.BytesIO(data), strict=True)
+        except (PdfReadError, PdfStreamError, OSError, ValueError) as error:
+            raise ValueError("Could not read this PDF. Check that it is valid and not damaged.") from error
+        if reader.is_encrypted:
+            raise ValueError("Password-protected PDFs are not supported.")
+        if len(reader.pages) > 50:
+            raise ValueError("PDF files are limited to 50 pages.")
+        try:
+            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        except (PdfReadError, PdfStreamError, OSError, ValueError) as error:
+            raise ValueError("Could not extract text from this PDF.") from error
+        if not text.strip():
+            raise ValueError("This PDF has no extractable text. Scanned PDFs are not supported yet.")
+    else:
+        if not data.startswith(b"PK"):
+            raise ValueError("The selected file does not appear to be a valid DOCX.")
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                entries = archive.infolist()
+        except zipfile.BadZipFile as error:
+            raise ValueError("Could not read this DOCX. Check that it is valid and not damaged.") from error
+        if len(entries) > 1000 or sum(entry.file_size for entry in entries) > 10_000_000:
+            raise ValueError("This DOCX file exceeds the document processing limits.")
+        if any(entry.flag_bits & 1 for entry in entries):
+            raise ValueError("Encrypted DOCX files are not supported.")
+        try:
+            document = WordDocument(io.BytesIO(data))
+            parts = _docx_container_text(document)
+            for section in document.sections:
+                parts.extend(_docx_container_text(section.header))
+                parts.extend(_docx_container_text(section.footer))
+            text = "\n".join(parts)
+        except (KeyError, OSError, PackageNotFoundError, ValueError, XMLSyntaxError) as error:
+            raise ValueError("Could not read this DOCX. Check that it is valid and not damaged.") from error
+        if not text.strip():
+            raise ValueError("This DOCX contains no extractable text.")
+
+    text = text.strip()
+    if len(text) > MAX_PRIVATE_TEXT_CHARS:
+        raise ValueError("Extracted document text exceeds the 100,000-character limit.")
+    return name, text
+
+
 def _retrieve(user_id: str, query: str) -> tuple[list[dict], bool]:
-    role = USERS[user_id]["role"]
+    account = _account(user_id)
+    if account["role"] == "personal":
+        return [], False
+    role = account["role"]
     query_terms = _tokens(query)
     inaccessible_requested = False
     matches = []
@@ -412,7 +544,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         if length < 0 or length > MAX_BODY:
-            raise ValueError("Request body exceeds the 1 MB limit.")
+            raise ValueError("Request body exceeds the 3 MB limit.")
         try:
             payload = json.loads(self.rfile.read(length))
         except (json.JSONDecodeError, UnicodeDecodeError) as error:
@@ -421,17 +553,33 @@ class GatewayHandler(BaseHTTPRequestHandler):
             raise ValueError("Request body must be a JSON object.")
         return payload
 
+    def _start_session(self, user_id: str) -> None:
+        token = secrets.token_urlsafe(32)
+        with SESSION_LOCK:
+            SESSIONS[token] = user_id
+        secure = "; Secure" if os.environ.get("RENDER") else ""
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header(
+            "Set-Cookie",
+            f"gateway_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800{secure}",
+        )
+        body = json.dumps({"status": "signed_in"}).encode()
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _user(self) -> str:
-        if AUTH_REQUIRED:
-            cookie = SimpleCookie(self.headers.get("Cookie", ""))
-            session = cookie.get("gateway_session")
-            if session is None:
-                raise AuthenticationError("Please sign in to use the gateway.")
+        cookie = SimpleCookie(self.headers.get("Cookie", ""))
+        session = cookie.get("gateway_session")
+        if session is not None:
             with SESSION_LOCK:
                 user_id = SESSIONS.get(session.value)
-            if user_id not in USERS:
-                raise AuthenticationError("Your session expired. Please sign in again.")
-            return user_id
+            if user_id in USERS or user_id in PERSONAL_USERS:
+                return user_id
+        if AUTH_REQUIRED:
+            raise AuthenticationError("Please sign in to use the gateway.")
         user_id = self.headers.get("X-Demo-User", "ananya")
         if user_id not in USERS:
             raise PermissionError("Unknown demo identity.")
@@ -440,7 +588,14 @@ class GatewayHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/api/health":
-            self._json(200, {"status": "ok"})
+            self._json(
+                200,
+                {
+                    "status": "ok",
+                    "auth_required": AUTH_REQUIRED,
+                    "public_signup_enabled": PUBLIC_SIGNUP_ENABLED,
+                },
+            )
             return
         if path.startswith("/api/"):
             try:
@@ -454,13 +609,18 @@ class GatewayHandler(BaseHTTPRequestHandler):
         else:
             user_id = ""
         if path == "/api/state":
+            account = _account(user_id)
+            events = STATE.events_for(user_id)
             with STATE.lock:
-                events = list(STATE.events)
-                policies = STATE.policies.copy()
+                policies = (
+                    STATE.personal_policies.setdefault(user_id, DEFAULT_POLICIES.copy()).copy()
+                    if account["role"] == "personal"
+                    else STATE.policies.copy()
+                )
                 approvals = [
                     {"id": item["id"], "user": USERS[item["user"]]["name"], "categories": item["categories"]}
                     for item in STATE.approvals.values()
-                ]
+                ] if account["role"] != "personal" else []
             counts = Counter(category for event in events for category in event["categories"])
             now = datetime.now(timezone.utc)
             activity = [0] * 6
@@ -468,10 +628,14 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 age_hours = (now - datetime.fromisoformat(event["time"])).total_seconds() / 3600
                 if 0 <= age_hours < 6:
                     activity[5 - int(age_hours)] += 1
-            public_users = {
-                account_id: {"name": account["name"], "role": account["role"]}
-                for account_id, account in USERS.items()
-            }
+            public_users = (
+                {user_id: {"name": account["name"], "role": account["role"]}}
+                if account["role"] == "personal"
+                else {
+                    account_id: {"name": account["name"], "role": account["role"]}
+                    for account_id, account in USERS.items()
+                }
+            )
             self._json(
                 200,
                 {
@@ -482,7 +646,13 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     "activity": activity,
                     "users": public_users,
                     "current_user": user_id,
-                    "auth_required": AUTH_REQUIRED,
+                    "auth_required": (
+                        AUTH_REQUIRED
+                        or account["role"] == "personal"
+                        or "password_hash" in account
+                    ),
+                    "mode": "personal" if account["role"] == "personal" else "professional",
+                    "public_signup_enabled": PUBLIC_SIGNUP_ENABLED,
                     "model": {
                         "configured": bool(os.environ.get("LLM_BASE_URL") and os.environ.get("LLM_MODEL")),
                         "name": os.environ.get("LLM_MODEL", "") or "Safe simulation",
@@ -496,7 +666,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/documents":
             user_id = self._user()
-            role = USERS[user_id]["role"]
+            role = _account(user_id)["role"]
+            if role == "personal":
+                self._json(200, {"can_upload": False, "documents": []})
+                return
             with STATE.lock:
                 documents = list(DOCUMENTS)
             self._json(
@@ -552,6 +725,136 @@ class GatewayHandler(BaseHTTPRequestHandler):
         try:
             payload = self._body()
             path = urlparse(self.path).path
+            if path == "/api/personal/demo-login":
+                if not PUBLIC_SIGNUP_ENABLED:
+                    self._json(
+                        503,
+                        {"error": "Personal demo sign-in is not available on this hosted deployment."},
+                    )
+                    return
+                user_id = "personal-demo"
+                with SESSION_LOCK:
+                    PERSONAL_USERS.setdefault(
+                        user_id,
+                        {
+                            "name": "Personal Demo Account",
+                            "email": "demo@sanraksh.local",
+                            "role": "personal",
+                        },
+                    )
+                self._start_session(user_id)
+                return
+            if path in {
+                "/api/professional/demo-register",
+                "/api/professional/demo-login",
+            }:
+                if AUTH_REQUIRED:
+                    self._json(
+                        503,
+                        {"error": "Professional demo accounts are unavailable on hosted deployments."},
+                    )
+                    return
+                email = payload.get("email")
+                password = payload.get("password")
+                if not isinstance(email, str) or not re.fullmatch(
+                    r"[^@\s]{1,64}@[^@\s.]+(?:\.[^@\s.]+)+", email.strip()
+                ):
+                    raise ValueError("Enter a valid work email address.")
+                email = email.strip().lower()
+                if not isinstance(password, str) or not 1 <= len(password) <= 1024:
+                    raise ValueError("Enter a password of up to 1,024 characters.")
+                with SESSION_LOCK:
+                    matching = next(
+                        (
+                            (account_id, account)
+                            for account_id, account in USERS.items()
+                            if account.get("email") == email
+                            and "password_hash" in account
+                        ),
+                        None,
+                    )
+                    if path.endswith("/demo-register"):
+                        name = payload.get("name")
+                        role = payload.get("role")
+                        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
+                            raise ValueError("Enter your full name (up to 80 characters).")
+                        if len(password) < 12:
+                            raise ValueError("Use a password with at least 12 characters.")
+                        if not isinstance(role, str) or role not in {
+                            "analyst", "manager", "admin"
+                        }:
+                            raise ValueError("Choose a valid demo role.")
+                        if matching:
+                            raise ValueError("An account with this work email already exists.")
+                        user_id = "professional-" + uuid4().hex
+                        USERS[user_id] = {
+                            "name": name.strip(),
+                            "email": email,
+                            "role": role,
+                            "password_hash": hash_password(password),
+                        }
+                    else:
+                        if matching is None or not verify_password(
+                            password, matching[1]["password_hash"]
+                        ):
+                            self._json(401, {"error": "Incorrect work email or password."})
+                            return
+                        user_id = matching[0]
+                self._start_session(user_id)
+                return
+            if path in {"/api/personal/register", "/api/personal/login"}:
+                if not PUBLIC_SIGNUP_ENABLED:
+                    self._json(
+                        503,
+                        {"error": "Personal accounts are not available on this hosted deployment yet."},
+                    )
+                    return
+                email = payload.get("email")
+                password = payload.get("password")
+                if not isinstance(email, str) or not re.fullmatch(
+                    r"[^@\s]{1,64}@[^@\s.]+(?:\.[^@\s.]+)+", email.strip()
+                ):
+                    raise ValueError("Enter a valid email address.")
+                email = email.strip().lower()
+                if not isinstance(password, str):
+                    raise ValueError("Enter your password.")
+                if len(password) > 1024:
+                    raise ValueError("Password must be no longer than 1,024 characters.")
+                with SESSION_LOCK:
+                    matching = next(
+                        (
+                            (account_id, account)
+                            for account_id, account in PERSONAL_USERS.items()
+                            if account["email"] == email
+                        ),
+                        None,
+                    )
+                    if path.endswith("/register"):
+                        name = payload.get("name")
+                        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
+                            raise ValueError("Enter your name (up to 80 characters).")
+                        if len(password) < 12:
+                            raise ValueError("Use a password with at least 12 characters.")
+                        if matching:
+                            raise ValueError("An account with this email already exists.")
+                        user_id = "personal-" + uuid4().hex
+                        PERSONAL_USERS[user_id] = {
+                            "name": name.strip(),
+                            "email": email,
+                            "role": "personal",
+                            "password_hash": hash_password(password),
+                        }
+                    else:
+                        if (
+                            matching is None
+                            or "password_hash" not in matching[1]
+                            or not verify_password(password, matching[1]["password_hash"])
+                        ):
+                            self._json(401, {"error": "Incorrect email or password."})
+                            return
+                        user_id = matching[0]
+                self._start_session(user_id)
+                return
             if path == "/api/login":
                 if not AUTH_REQUIRED:
                     self._json(400, {"error": "Sign-in is only enabled when hosted accounts are configured."})
@@ -565,18 +868,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 ):
                     self._json(401, {"error": "Incorrect username or password."})
                     return
-                token = secrets.token_urlsafe(32)
-                with SESSION_LOCK:
-                    SESSIONS[token] = user_id
-                secure = "; Secure" if os.environ.get("RENDER") else ""
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Set-Cookie", f"gateway_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800{secure}")
-                body = json.dumps({"status": "signed_in"}).encode()
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(body)
+                self._start_session(user_id)
                 return
             if path == "/api/logout":
                 user_id = self._user()
@@ -617,7 +909,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self._json(502, {"error": str(error)})
 
     def _add_document(self, user_id: str, payload: dict) -> None:
-        if USERS[user_id]["role"] != "admin":
+        if _account(user_id)["role"] != "admin":
             raise PermissionError("Only an admin can add documents.")
         title = payload.get("title")
         content = payload.get("content")
@@ -662,23 +954,33 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 self._json(404, {"error": "API route not found."})
                 return
             user_id = self._user()
-            if AUTH_REQUIRED and USERS[user_id]["role"] != "admin":
+            role = _account(user_id)["role"]
+            if AUTH_REQUIRED and role not in {"admin", "personal"}:
                 raise PermissionError("Only an admin can change hosted security policies.")
             payload = self._body()
             policies = payload.get("policies")
             if not isinstance(policies, dict):
                 raise ValueError("Expected a policies object.")
             with STATE.lock:
-                updated = STATE.policies.copy()
+                personal = role == "personal"
+                updated = (
+                    STATE.personal_policies.setdefault(user_id, DEFAULT_POLICIES.copy()).copy()
+                    if personal
+                    else STATE.policies.copy()
+                )
                 for category, action in policies.items():
                     if (
                         category not in DEFAULT_POLICIES
                         or not isinstance(action, str)
                         or action not in POLICY_ACTIONS
+                        or (personal and action == "approval")
                     ):
                         raise ValueError(f"Invalid policy setting for {category}.")
                     updated[category] = action
-                STATE.policies = updated
+                if personal:
+                    STATE.personal_policies[user_id] = updated
+                else:
+                    STATE.policies = updated
             self._json(200, {"policies": updated})
         except PermissionError as error:
             self._json(403, {"error": str(error)})
@@ -693,8 +995,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
             raise ValueError("text must be a string of at most 20,000 characters.")
         findings = inspect_text(text)
         categories = sorted({item["category"] for item in findings})
-        with STATE.lock:
-            policies = STATE.policies.copy()
+        policies = STATE.policies_for(user_id)
         action = _policy_decision(findings, policies)
         self._json(
             200,
@@ -709,14 +1010,31 @@ class GatewayHandler(BaseHTTPRequestHandler):
         text = payload.get("text")
         if not isinstance(text, str) or not text.strip() or len(text) > 20_000:
             raise ValueError("text must be a non-empty string of at most 20,000 characters.")
-        findings = inspect_text(text)
+        attachment_name = None
+        attachment_text = None
+        if "attachment" in payload and payload["attachment"] is not None:
+            attachment_name, attachment_text = _extract_private_attachment(payload["attachment"])
+        prompt_findings = inspect_text(text)
+        attachment_findings = inspect_text(attachment_text) if attachment_text is not None else []
+        findings = prompt_findings + attachment_findings
         categories = sorted({item["category"] for item in findings})
-        with STATE.lock:
-            policies = STATE.policies.copy()
+        attachment_result = None
+        if attachment_text is not None:
+            attachment_injection = any(
+                item["category"] == "prompt_injection" for item in attachment_findings
+            )
+            attachment_result = {
+                "name": attachment_name,
+                "status": "quarantined" if attachment_injection else "inspected",
+                "findings": sorted({item["category"] for item in attachment_findings}),
+            }
+        policies = STATE.policies_for(user_id)
         action = _policy_decision(findings, policies)
         if action == "block":
             STATE.log(user_id, categories, "block", "blocked before model")
-            self._json(200, {"status": "blocked", "findings": categories, "message": "Policy blocked this request before it reached the model."})
+            if attachment_result:
+                attachment_result["status"] = "blocked"
+            self._json(200, {"status": "blocked", "findings": categories, "message": "Policy blocked this request before it reached the model.", "attachment": attachment_result})
             return
         if action == "approval":
             approval_id = str(uuid4())
@@ -725,17 +1043,36 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     "id": approval_id,
                     "user": user_id,
                     "text": text,
+                    "attachment": (
+                        {"name": attachment_name, "content": attachment_text}
+                        if attachment_text is not None else None
+                    ),
                     "categories": categories,
                     "created": time.time(),
                 }
             STATE.log(user_id, categories, "approval", "awaiting approval")
-            self._json(200, {"status": "approval_required", "id": approval_id, "findings": categories, "message": "Request held for administrator approval; it has not reached the model."})
+            if attachment_result:
+                attachment_result["status"] = "held for approval"
+            self._json(200, {"status": "approval_required", "id": approval_id, "findings": categories, "message": "Request held for administrator approval; it has not reached the model.", "attachment": attachment_result})
             return
-        sanitized = apply_redaction(text, findings, policies)
+        # Findings use offsets from separate inputs; sanitize each source independently.
+        sanitized = apply_redaction(text, prompt_findings, policies)
+        private_document = None
+        if attachment_text is not None:
+            attachment_injection = any(
+                item["category"] == "prompt_injection" for item in attachment_findings
+            )
+            if not attachment_injection:
+                private_document = {
+                    "title": "Private user attachment",
+                    "content": apply_redaction(attachment_text, attachment_findings, policies),
+                }
         documents, inaccessible = _retrieve(user_id, sanitized)
         if inaccessible:
             STATE.log(user_id, ["restricted_data"], "block", "unauthorized retrieval denied")
-            self._json(200, {"status": "blocked", "findings": ["restricted_data"], "message": "Access denied. No matching authorized document was provided to the model."})
+            if attachment_result:
+                attachment_result["status"] = "not sent; request blocked"
+            self._json(200, {"status": "blocked", "findings": ["restricted_data"], "message": "Access denied. No matching authorized document was provided to the model.", "attachment": attachment_result})
             return
         # Never pass a retrieved chunk containing instructions to the model.
         safe_documents = []
@@ -750,15 +1087,18 @@ class GatewayHandler(BaseHTTPRequestHandler):
             categories = sorted(set(categories + ["prompt_injection"]))
             if policies.get("prompt_injection") == "block":
                 STATE.log(user_id, categories, "block", "indirect injection blocked")
-                self._json(200, {"status": "blocked", "findings": categories, "message": "An instruction-like payload in a retrieved document was quarantined; no untrusted document content reached the model."})
+                if attachment_result:
+                    attachment_result["status"] = "not sent; request blocked"
+                self._json(200, {"status": "blocked", "findings": categories, "message": "An instruction-like payload in a retrieved document was quarantined; no untrusted document content reached the model.", "attachment": attachment_result})
                 return
-        reply, mode = _model_reply(sanitized, safe_documents)
+        model_context = safe_documents + ([private_document] if private_document else [])
+        reply, mode = _model_reply(sanitized, model_context)
         output_findings = inspect_text(reply)
         output_categories = sorted({item["category"] for item in output_findings})
         output_action = _policy_decision(output_findings, policies)
         if output_action == "block":
             STATE.log(user_id, sorted(set(categories + output_categories)), "block", "sensitive response withheld")
-            self._json(200, {"status": "response_blocked", "findings": output_categories, "message": "The model response contained restricted content and was withheld."})
+            self._json(200, {"status": "response_blocked", "findings": output_categories, "message": "The model response contained restricted content and was withheld.", "attachment": attachment_result})
             return
         reply = apply_redaction(reply, output_findings, policies)
         combined = sorted(set(categories + output_categories))
@@ -776,6 +1116,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 "action": event_action,
                 "model_mode": mode,
                 "sources": [{"id": doc["id"], "title": doc["title"]} for doc in safe_documents],
+                "attachment": attachment_result,
             },
         )
 
@@ -800,7 +1141,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self._json(200, {"documents": safe_documents, "quarantined": injected})
 
     def _approve(self, user_id: str, payload: dict) -> None:
-        if USERS[user_id]["role"] not in {"admin", "manager"}:
+        if _account(user_id)["role"] not in {"admin", "manager"}:
             raise PermissionError("Only a manager or admin can approve held requests.")
         approval_id = payload.get("id")
         if not isinstance(approval_id, str) or payload.get("decision") not in {"approve", "deny"}:
@@ -813,10 +1154,27 @@ class GatewayHandler(BaseHTTPRequestHandler):
             STATE.log(user_id, request["categories"], "block", "approval denied")
             self._json(200, {"status": "denied", "message": "Request denied and discarded."})
             return
-        with STATE.lock:
-            policies = STATE.policies.copy()
-        safe_text = apply_redaction(request["text"], inspect_text(request["text"]), policies)
-        reply, mode = _model_reply(safe_text, [])
+        policies = STATE.policies_for(user_id)
+        text_findings = inspect_text(request["text"])
+        if _policy_decision(text_findings, policies) == "block":
+            STATE.log(user_id, request["categories"], "block", "approved request blocked by current policy")
+            self._json(200, {"status": "blocked", "message": "Current policy blocked this request before model dispatch."})
+            return
+        safe_text = apply_redaction(request["text"], text_findings, policies)
+        context = []
+        attachment = request.get("attachment")
+        if attachment:
+            attachment_findings = inspect_text(attachment["content"])
+            if _policy_decision(attachment_findings, policies) == "block":
+                STATE.log(user_id, request["categories"], "block", "approved attachment blocked by current policy")
+                self._json(200, {"status": "blocked", "message": "Current policy blocked the attached document before model dispatch."})
+                return
+            if not any(item["category"] == "prompt_injection" for item in attachment_findings):
+                context.append({
+                    "title": "Private user attachment",
+                    "content": apply_redaction(attachment["content"], attachment_findings, policies),
+                })
+        reply, mode = _model_reply(safe_text, context)
         findings = inspect_text(reply)
         if _policy_decision(findings, policies) == "block":
             STATE.log(user_id, request["categories"], "block", "sensitive response withheld")

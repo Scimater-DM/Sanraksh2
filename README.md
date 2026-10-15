@@ -4,13 +4,21 @@ A local-first security gateway and dashboard that inspects user prompts and mode
 
 ## Run locally
 
-Requires Python 3.10+; there are no third-party Python packages.
+Requires Python 3.10+ and the document-extraction packages in `requirements.txt`.
 
 ```powershell
+python -m pip install -r requirements.txt
 python gateway.py
 ```
 
-Open <http://127.0.0.1:8080>. The local demo starts without credentials or a model. Choose Ananya Sharma (analyst), Rohan Mehta (manager), or Priya Nair (admin) in the top-right selector to see their different document permissions. A built-in safe response simulator lets you exercise the controls offline.
+Open <http://127.0.0.1:8080> and choose a workspace:
+
+- **Private · Professional** is the organization gateway. Locally, sign in to or create a temporary demo account, or choose the **Demo identity** role preview for fictional Ananya Sharma (analyst), Rohan Mehta (manager), or Priya Nair (admin). Local demo accounts and roles are not real organization credentials and reset when the process restarts. Hosted deployments authenticate organization accounts provisioned by the administrator; public self-registration is not enabled.
+- **Public · Personal** is for an individual scanning their own prompts and private attachments. The local demo supports personal account sign-up and sign-in; personal policies and metadata-only audit events are isolated by account. Local personal accounts exist only in server memory and are lost when the process restarts. Do not use real credentials or sensitive records in this demo.
+
+Hosted personal registration is intentionally disabled until durable account storage is configured. Direct uploads to ChatGPT or another external AI service bypass Sanraksh; use the gateway's **Inspect & send** flow to scan a request.
+
+In **Live request inspection**, any signed-in user can attach one PDF, DOCX, TXT, or Markdown file up to 2 MB to a private request. Sanraksh extracts up to 100,000 characters, checks it with the active policies, masks/redacts configured values, and quarantines detected instruction injection before model dispatch. The attachment is request-scoped; it is not added to the shared document library or written to disk. If policy requires approval, its extracted text remains temporarily in server memory until the request is approved or the server restarts. Scanned PDFs without selectable text are not supported (no OCR).
 
 ## Deploy on Render
 
@@ -35,7 +43,7 @@ Open <http://127.0.0.1:8080>. The local demo starts without credentials or a mod
 3. Set `LLM_API_KEY` as a Render secret. The blueprint configures the OpenAI-compatible endpoint and `gpt-4o-mini` by default. `LLM_BASE_URL` and `LLM_MODEL` can be changed for another compatible hosted endpoint. Keep provider credentials in Render's environment settings; never put them in the repository or browser.
 4. Deploy. Render provides `PORT`; the service binds to `0.0.0.0` in its hosted environment. `/api/health` is the unauthenticated health check. The dashboard and its API use the authenticated, secure, HTTP-only session cookie.
 
-The gateway refuses to start on Render without `GATEWAY_USERS_JSON`. Hosted demo identities are real password-authenticated accounts; the local identity selector is only a local demonstration and must not be treated as authentication. Only hosted admins may change global policies; managers and admins may review held requests.
+The gateway refuses to start on Render without `GATEWAY_USERS_JSON`. Hosted professional accounts are password-authenticated; the local identity selector is only a local demonstration and must not be treated as authentication. Hosted public/personal sign-up returns unavailable until a durable account database is selected and configured. Only hosted admins may change organization-wide policies; managers and admins may review held requests.
 
 If you already created a Render **Project** named Sanraksh, open that project and add a **Blueprint** from the connected GitHub repository; Render will read this repository's `render.yaml` and add the service to the project. Alternatively, create a **Web Service** in that project and connect the same repository, using the build, start, and health-check settings shown above. The Blueprint names the service `sanraksh-ai-security-gateway`.
 

@@ -133,6 +133,8 @@ const CATEGORY_COLORS = {
 };
 let currentState = null;
 let currentUser = localStorage.getItem("sanraksh-demo-user") || "ananya";
+let publicSignupEnabled = false;
+let hostedAuthRequired = false;
 let benchmarkCases = null;
 let gameRound = 0;
 let gameScore = 0;
@@ -146,7 +148,10 @@ function escapeHTML(value) {
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
   if (!headers.has("Content-Type") && options.body) headers.set("Content-Type", "application/json");
-  if (!currentState?.auth_required && path !== "/api/login") headers.set("X-Demo-User", currentUser);
+  if (
+    !currentState?.auth_required
+    && !["/api/login", "/api/personal/login", "/api/personal/register"].includes(path)
+  ) headers.set("X-Demo-User", currentUser);
   const response = await fetch(path, {...options, headers, credentials: "same-origin"});
   const payload = response.status === 204 ? {} : await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -159,21 +164,46 @@ async function api(path, options = {}) {
 
 function showLogin(message = "") {
   document.getElementById("login-overlay").classList.remove("hidden");
-  document.getElementById("login-error").textContent = message;
+  document.querySelectorAll("#login-overlay > *").forEach(panel => panel.classList.add("hidden"));
+  document.getElementById("workspace-choice").classList.remove("hidden");
+  document.getElementById("login-error").textContent = "";
+  document.getElementById("public-mode-status").textContent = message || (
+    publicSignupEnabled
+      ? "Personal sign-up is local-only in this demo; accounts reset when the server restarts."
+      : "Hosted personal sign-up is disabled until durable account storage is configured."
+  );
+  document.getElementById("public-mode-button").disabled = !publicSignupEnabled;
+}
+
+function showLoginPanel(id) {
+  document.querySelectorAll("#login-overlay > *").forEach(panel => panel.classList.add("hidden"));
+  document.getElementById(id).classList.remove("hidden");
+  document.getElementById("login-overlay").classList.remove("hidden");
 }
 
 function render(state) {
   currentState = state;
   const users = state.users || {};
+  const personalMode = state.mode === "personal";
+  const heroMeta = document.querySelector(".hero-meta");
+  const gatewayCopy = document.querySelector("#gateway .panel-heading p");
+  const auditCopy = document.querySelector("#audit .panel-heading p");
+  const privacyNote = document.getElementById("privacy-note");
+  const attachmentNote = document.querySelector(".private-attachment > p");
+  document.body.classList.toggle("personal-mode", personalMode);
   if (state.auth_required) {
     document.getElementById("identity-picker").classList.add("hidden");
     const account = users[state.current_user] || {};
-    document.getElementById("secure-identity").textContent = account.name || "Signed in";
+    document.getElementById("secure-identity").textContent = personalMode
+      ? `Personal · ${account.name || "Account"}`
+      : account.name || "Signed in";
     document.getElementById("secure-identity").classList.remove("hidden");
     document.getElementById("logout-button").classList.remove("hidden");
-    document.getElementById("environment-label").textContent = "SECURE HOSTED";
+    document.getElementById("environment-label").textContent = personalMode
+      ? "PERSONAL PROTECTION" : "PRIVATE WORKSPACE";
     document.getElementById("sidebar-user").textContent = account.name || "Signed in";
-    document.getElementById("sidebar-role").textContent = (account.role || "user") + " account";
+    document.getElementById("sidebar-role").textContent = personalMode
+      ? "personal account" : (account.role || "user") + " account";
   } else {
     document.getElementById("identity-picker").classList.remove("hidden");
     document.getElementById("secure-identity").classList.add("hidden");
@@ -191,6 +221,41 @@ function render(state) {
   }
   document.getElementById("model-label").textContent = state.model?.configured
     ? state.model.name : "Safe simulation";
+  const heading = document.querySelector(".page-heading h1");
+  const headingCopy = document.querySelector(".page-heading p");
+  const heroTitle = document.querySelector(".hero-banner h2");
+  const heroCopy = document.querySelector(".hero-banner p");
+  if (personalMode) {
+    heading.textContent = "Your personal protection";
+    headingCopy.textContent = "Check prompts and private files before they reach your chosen AI model.";
+    heroTitle.innerHTML = 'Your AI, <span>with a safety check.</span>';
+    heroCopy.textContent = "Scan personal information, credentials, and hidden instructions before sending a prompt or private attachment.";
+    heroMeta.innerHTML = '<span class="hero-check">✓</span> Personal data scan <b>·</b> <span class="hero-check">✓</span> Private file inspection <b>·</b> <span class="hero-check">✓</span> Account-isolated history';
+    gatewayCopy.textContent = "Your message and optional private file are inspected first, then sent to this gateway's configured AI model; its provider's privacy and retention terms still apply.";
+    auditCopy.textContent = "Only your account's metadata is shown; prompt bodies, matched values, and model responses are not retained.";
+    privacyNote.lastChild.textContent = " Inspected content is sent to this gateway's configured AI model";
+    attachmentNote.textContent = "Files are scanned before the configured model receives them and are not added to a company library. Direct uploads to ChatGPT bypass Sanraksh.";
+    document.getElementById("policy-status").textContent =
+      "Choose an action for each category. These settings affect only your personal account.";
+    document.querySelector("#policies h2").textContent = "Personal protection settings";
+    document.querySelector("#policies .panel-heading p").textContent =
+      "These controls apply only to your personal account.";
+  } else {
+    heading.textContent = "Security overview";
+    headingCopy.textContent = "Protect employee and citizen data before it reaches an AI model.";
+    heroTitle.innerHTML = 'Catch the leak <span>before it leaves.</span>';
+    heroCopy.textContent = "Catch accidental disclosures, prompt injection, and unauthorized document access before model dispatch.";
+    heroMeta.innerHTML = '<span class="hero-check">✓</span> Aadhaar · PAN · UPI <b>·</b> <span class="hero-check">✓</span> Permission-aware retrieval <b>·</b> <span class="hero-check">✓</span> Content-free audit';
+    gatewayCopy.textContent = "Run a request through the same controls used by the gateway.";
+    auditCopy.textContent = "Metadata only—no prompt bodies, matched values, or model responses are retained.";
+    privacyNote.lastChild.textContent = " Content is not retained in gateway logs";
+    attachmentNote.textContent = "Use Inspect & send—direct uploads to ChatGPT bypass Sanraksh. Files are scanned first, kept out of shared documents and disk; approval holds may remain in server memory.";
+    document.getElementById("policy-status").textContent =
+      "Select a profile to update all controls together, then review each rule below.";
+    document.querySelector("#policies h2").textContent = "Policy controls";
+    document.querySelector("#policies .panel-heading p").textContent =
+      "Choose what happens when a category is detected. Changes take effect immediately.";
+  }
   const events = state.events || [];
   const blocked = events.filter(event =>
     event.action === "block" || /blocked|denied|withheld/i.test(event.outcome)
@@ -203,8 +268,8 @@ function render(state) {
     `${events.length ? Math.round(100 * blocked / events.length) : 0}%`;
   renderActivity(state.activity || []);
   const account = users[state.current_user || currentUser] || users[currentUser] || {};
-  document.getElementById("access-role").textContent =
-    account.role ? account.role[0].toUpperCase() + account.role.slice(1) : "Analyst";
+  document.getElementById("access-role").textContent = personalMode
+    ? "Personal" : account.role ? account.role[0].toUpperCase() + account.role.slice(1) : "Analyst";
   renderCategories(state.categories || {});
   renderPolicies(state.policies || {});
   renderAudit(events);
@@ -259,16 +324,19 @@ function labelShort(category) {
 }
 
 function renderPolicies(policies) {
+  const actions = currentState?.mode === "personal"
+    ? POLICY_ACTIONS.filter(action => action !== "approval")
+    : POLICY_ACTIONS;
   document.getElementById("policy-grid").innerHTML = Object.entries(POLICY_LABELS).map(([key, label]) => `
     <label class="policy-item">
       <span class="policy-top"><span class="policy-type"><i class="policy-dot" style="background:${CATEGORY_COLORS[key]}"></i>${escapeHTML(label)}</span></span>
       <select data-policy="${escapeHTML(key)}" aria-label="${escapeHTML(label)} action">
-        ${POLICY_ACTIONS.map(action => `<option value="${action}" ${policies[key] === action ? "selected" : ""}>${action[0].toUpperCase() + action.slice(1)}</option>`).join("")}
+        ${actions.map(action => `<option value="${action}" ${policies[key] === action ? "selected" : ""}>${action[0].toUpperCase() + action.slice(1)}</option>`).join("")}
       </select>
       <span class="policy-help">${escapeHTML(POLICY_HELP[key])}</span>
     </label>`).join("");
   const account = currentState?.users?.[currentState.current_user];
-  const canEdit = !currentState?.auth_required || account?.role === "admin";
+  const canEdit = currentState?.mode === "personal" || !currentState?.auth_required || account?.role === "admin";
   for (const [presetId, preset] of Object.entries(POLICY_PRESETS)) {
     const button = document.querySelector(`[data-preset="${presetId}"]`);
     const selected = Object.entries(preset.policies).every(([key, value]) => policies[key] === value);
@@ -349,13 +417,35 @@ function setResult({title, text, status = "success", categories = []}) {
   box.innerHTML = `<div class="result-title">${status === "blocked" ? "⊘" : status === "warn" ? "!" : "✓"} ${escapeHTML(title)}</div>${escapeHTML(text)}${tags ? `<div>${tags}</div>` : ""}`;
 }
 
+function encodeFileBase64(file) {
+  return file.arrayBuffer().then(buffer => {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+    }
+    return btoa(binary);
+  });
+}
+
+function clearPrivateAttachment() {
+  document.getElementById("private-file-input").value = "";
+  document.getElementById("private-file-name").textContent = "PDF, DOCX, TXT or Markdown · up to 2 MB";
+  document.getElementById("private-file-name").classList.remove("selected");
+  document.getElementById("private-file-remove").classList.add("hidden");
+}
+
 async function refresh() {
   const state = await api("/api/state");
   render(state);
 }
 
 async function sendPrompt() {
-  const text = document.getElementById("prompt-input").value.trim();
+  const fileInput = document.getElementById("private-file-input");
+  const file = fileInput.files[0];
+  const prompt = document.getElementById("prompt-input");
+  const text = prompt.value.trim() || (file ? "Summarize the attached document." : "");
   if (!text) {
     setResult({title: "Add a prompt", text: "Enter a message or choose a scenario to inspect.", status: "warn"});
     return;
@@ -364,7 +454,11 @@ async function sendPrompt() {
   button.disabled = true;
   button.innerHTML = "Inspecting…";
   try {
-    const result = await api("/api/chat", {method: "POST", body: JSON.stringify({text})});
+    if (file && file.size > 2_000_000) {
+      throw new Error("Private attachments must be no larger than 2 MB.");
+    }
+    const attachment = file ? {name: file.name, data: await encodeFileBase64(file)} : undefined;
+    const result = await api("/api/chat", {method: "POST", body: JSON.stringify({text, attachment})});
     const title = {
       blocked: "Blocked before model dispatch",
       response_blocked: "Response withheld by policy",
@@ -374,8 +468,12 @@ async function sendPrompt() {
     }[result.status] || "Gateway response";
     const status = ["blocked", "response_blocked"].includes(result.status) ? "blocked" :
       result.status === "delivered" ? (result.action === "warn" ? "warn" : "success") : "warn";
-    const reply = result.reply ? `${result.reply}${result.sources?.length ? `\n\nSources: ${result.sources.map(item => item.title).join(", ")}` : ""}${result.model_mode === "simulation" ? "\n\nSafe simulation mode · configure an LLM endpoint to generate model responses." : ""}` : result.message;
+    const attachmentNote = result.attachment
+      ? `\n\nAttachment: ${result.attachment.name} · ${result.attachment.status}${result.attachment.findings?.length ? ` · flags: ${result.attachment.findings.join(", ")}` : ""}`
+      : "";
+    const reply = result.reply ? `${result.reply}${result.sources?.length ? `\n\nSources: ${result.sources.map(item => item.title).join(", ")}` : ""}${attachmentNote}${result.model_mode === "simulation" ? "\n\nSafe simulation mode · configure an LLM endpoint to generate model responses." : ""}` : `${result.message || ""}${attachmentNote}`;
     setResult({title, text: reply || result.message || "", status, categories: [...new Set([...(result.findings || []), ...(result.response_findings || [])])]});
+    if (file) clearPrivateAttachment();
     await refresh();
   } catch (error) {
     if (error.status === 401) showLogin(error.message);
@@ -659,6 +757,24 @@ function showAwarenessResult() {
 
 async function init() {
   document.getElementById("send-button").addEventListener("click", sendPrompt);
+  document.getElementById("private-file-input").addEventListener("change", event => {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (!/\.(pdf|docx|txt|md)$/i.test(file.name)) {
+      setResult({title: "Unsupported attachment", text: "Choose a PDF, DOCX, TXT, or Markdown file.", status: "warn"});
+      clearPrivateAttachment();
+      return;
+    }
+    if (file.size > 2_000_000) {
+      setResult({title: "Attachment too large", text: "Private attachments must be no larger than 2 MB.", status: "warn"});
+      clearPrivateAttachment();
+      return;
+    }
+    document.getElementById("private-file-name").textContent = `${file.name} · ${(file.size / 1024).toFixed(1)} KB`;
+    document.getElementById("private-file-name").classList.add("selected");
+    document.getElementById("private-file-remove").classList.remove("hidden");
+  });
+  document.getElementById("private-file-remove").addEventListener("click", clearPrivateAttachment);
   document.getElementById("demo-activity-button").addEventListener("click", loadDemoActivity);
   document.getElementById("retrieve-button").addEventListener("click", retrieve);
   document.getElementById("document-upload").addEventListener("submit", uploadDocument);
@@ -735,6 +851,7 @@ async function init() {
   });
   document.getElementById("refresh-button").addEventListener("click", () => refresh().catch(showError));
   document.getElementById("identity-select").addEventListener("change", event => {
+    clearPrivateAttachment();
     currentUser = event.target.value;
     localStorage.setItem("sanraksh-demo-user", currentUser);
     refresh().catch(showError);
@@ -751,18 +868,192 @@ async function init() {
     const password = document.getElementById("login-password").value;
     try {
       await api("/api/login", {method: "POST", body: JSON.stringify({user: username, password})});
-      document.getElementById("login-password").value = "";
       document.getElementById("login-overlay").classList.add("hidden");
       await refresh();
     } catch (error) {
-      showLogin(error.message);
+      document.getElementById("login-error").textContent = error.message;
     }
   });
-  document.getElementById("logout-button").addEventListener("click", async () => {
+  const enterPrivateWorkspace = async () => {
+    if (currentState?.mode === "personal") {
+      try { await api("/api/logout", {method: "POST", body: "{}"}); } catch (_) {}
+    }
+    if (hostedAuthRequired) {
+      document.querySelector("#login-form .section-kicker").textContent = "PRIVATE · PROFESSIONAL";
+      document.querySelector("#login-form h2").textContent = "Sign in to your workspace";
+      document.querySelector("#login-form p").textContent =
+        "Use the organization account provided by your workspace administrator.";
+      document.querySelector("#login-form label[for='login-user']").textContent = "Organization username";
+      document.querySelector("#login-form > small").textContent =
+        "Need access? Contact your organization administrator.";
+      showLoginPanel("login-form");
+    } else {
+      const select = document.getElementById("professional-demo-identity");
+      select.innerHTML = Object.entries(currentState?.users || {}).map(([id, user]) =>
+        `<option value="${escapeHTML(id)}">${escapeHTML(user.name)} · ${escapeHTML(user.role)}</option>`
+      ).join("");
+      select.value = currentUser;
+      document.getElementById("professional-demo-error").textContent = "";
+      document.getElementById("professional-hosted-note").classList.add("hidden");
+      document.getElementById("professional-demo-tabs").classList.remove("hidden");
+      document.getElementById("professional-hosted-footnote").classList.remove("hidden");
+      document.getElementById("professional-login-button").textContent = "Sign in to workspace →";
+      setProfessionalTab("signin");
+      showLoginPanel("professional-demo-card");
+    }
+  };
+  const openWorkspaceChooser = async () => {
+    clearPrivateAttachment();
     try { await api("/api/logout", {method: "POST", body: "{}"}); } catch (_) {}
     currentState = null;
-    showLogin("You have signed out.");
+    if (!hostedAuthRequired) await refresh();
+    showLogin();
+  };
+  document.getElementById("private-mode-button").addEventListener("click", () => {
+    enterPrivateWorkspace().catch(showError);
   });
+  document.getElementById("professional-demo-enter").addEventListener("click", async () => {
+    currentUser = document.getElementById("professional-demo-identity").value;
+    localStorage.setItem("sanraksh-demo-user", currentUser);
+    document.getElementById("login-overlay").classList.add("hidden");
+    try {
+      await refresh();
+    } catch (error) {
+      document.getElementById("professional-demo-error").textContent = error.message;
+      showLoginPanel("professional-demo-card");
+    }
+  });
+  const setProfessionalTab = tab => {
+    const selected = {
+      signin: "professional-signin-tab",
+      register: "professional-register-tab",
+      identity: "professional-identity-tab"
+    }[tab];
+    ["professional-signin-tab", "professional-register-tab", "professional-identity-tab"]
+      .forEach(id => document.getElementById(id).classList.toggle("selected", id === selected));
+    document.getElementById("professional-demo-login-form").classList.toggle("hidden", tab !== "signin");
+    document.getElementById("professional-demo-register-form").classList.toggle("hidden", tab !== "register");
+    document.getElementById("professional-demo-identity-panel").classList.toggle("hidden", tab !== "identity");
+    document.getElementById("professional-demo-title").textContent = tab === "signin"
+      ? "Organization access" : tab === "register" ? "Create a demo account" : "Choose a demo identity";
+    document.getElementById("professional-demo-description").textContent = tab === "signin"
+      ? "Sign in with an existing local demo account."
+      : tab === "register"
+        ? "Create a temporary account to preview an organization role."
+        : "Preview the organization experience with a fictional role. This is not a real sign-in.";
+  };
+  document.getElementById("professional-signin-tab").addEventListener("click", () =>
+    setProfessionalTab("signin")
+  );
+  document.getElementById("professional-register-tab").addEventListener("click", () =>
+    setProfessionalTab("register")
+  );
+  document.getElementById("professional-identity-tab").addEventListener("click", () =>
+    setProfessionalTab("identity")
+  );
+  document.getElementById("professional-demo-login-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const data = {
+      email: document.getElementById("professional-login-email").value,
+      password: document.getElementById("professional-login-password").value
+    };
+    try {
+      await api("/api/professional/demo-login", {method: "POST", body: JSON.stringify(data)});
+      document.getElementById("login-overlay").classList.add("hidden");
+      event.currentTarget.reset();
+      await refresh();
+    } catch (error) {
+      document.getElementById("professional-login-error").textContent = error.message;
+    }
+  });
+  document.getElementById("professional-demo-register-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const data = {
+      name: document.getElementById("professional-register-name").value,
+      email: document.getElementById("professional-register-email").value,
+      role: document.getElementById("professional-register-role").value,
+      password: document.getElementById("professional-register-password").value
+    };
+    try {
+      await api("/api/professional/demo-register", {method: "POST", body: JSON.stringify(data)});
+      document.getElementById("login-overlay").classList.add("hidden");
+      event.currentTarget.reset();
+      await refresh();
+    } catch (error) {
+      document.getElementById("professional-register-error").textContent = error.message;
+    }
+  });
+  document.getElementById("public-mode-button").addEventListener("click", () => {
+    if (!publicSignupEnabled) {
+      document.getElementById("public-mode-status").textContent =
+        "Personal sign-up is disabled on this hosted deployment until durable account storage is configured.";
+      return;
+    }
+    document.getElementById("personal-login-error").textContent = "";
+    document.getElementById("personal-register-error").textContent = "";
+    showLoginPanel("personal-account-card");
+  });
+  document.querySelectorAll("[data-back-to-modes]").forEach(button =>
+    button.addEventListener("click", () => showLogin())
+  );
+  document.getElementById("personal-signin-tab").addEventListener("click", () => {
+    document.getElementById("personal-login-form").classList.remove("hidden");
+    document.getElementById("personal-register-form").classList.add("hidden");
+    document.getElementById("personal-signin-tab").classList.add("selected");
+    document.getElementById("personal-register-tab").classList.remove("selected");
+    document.getElementById("personal-account-title").textContent = "Your personal protection";
+  });
+  document.getElementById("personal-register-tab").addEventListener("click", () => {
+    document.getElementById("personal-login-form").classList.add("hidden");
+    document.getElementById("personal-register-form").classList.remove("hidden");
+    document.getElementById("personal-signin-tab").classList.remove("selected");
+    document.getElementById("personal-register-tab").classList.add("selected");
+    document.getElementById("personal-account-title").textContent = "Create your account";
+  });
+  document.getElementById("personal-demo-login").addEventListener("click", async () => {
+    const button = document.getElementById("personal-demo-login");
+    button.disabled = true;
+    try {
+      await api("/api/personal/demo-login", {method: "POST", body: "{}"});
+      document.getElementById("login-overlay").classList.add("hidden");
+      await refresh();
+    } catch (error) {
+      document.getElementById("personal-login-error").textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  });
+  const submitPersonalAccount = async (formId, endpoint, fields, errorId) => {
+    const data = Object.fromEntries(fields.map(([key, inputId]) => [
+      key, document.getElementById(inputId).value
+    ]));
+    try {
+      await api(endpoint, {method: "POST", body: JSON.stringify(data)});
+      document.getElementById("login-overlay").classList.add("hidden");
+      document.getElementById(formId).reset();
+      await refresh();
+    } catch (error) {
+      document.getElementById(errorId).textContent = error.message;
+    }
+  };
+  document.getElementById("personal-login-form").addEventListener("submit", event => {
+    event.preventDefault();
+    submitPersonalAccount(
+      "personal-login-form", "/api/personal/login",
+      [["email", "personal-login-email"], ["password", "personal-login-password"]],
+      "personal-login-error"
+    );
+  });
+  document.getElementById("personal-register-form").addEventListener("submit", event => {
+    event.preventDefault();
+    submitPersonalAccount(
+      "personal-register-form", "/api/personal/register",
+      [["name", "personal-register-name"], ["email", "personal-register-email"], ["password", "personal-register-password"]],
+      "personal-register-error"
+    );
+  });
+  document.getElementById("logout-button").addEventListener("click", openWorkspaceChooser);
+  document.getElementById("workspace-switch-button").addEventListener("click", openWorkspaceChooser);
   document.getElementById("policy-grid").addEventListener("change", async event => {
     if (!event.target.matches("[data-policy]")) return;
     try {
@@ -825,8 +1116,20 @@ async function init() {
     document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item === link));
   });
   try {
+    const health = await api("/api/health");
+    hostedAuthRequired = health.auth_required === true;
+    publicSignupEnabled = health.public_signup_enabled === true;
+    document.getElementById("public-mode-button").disabled = !publicSignupEnabled;
+    document.getElementById("public-mode-status").textContent = publicSignupEnabled
+      ? "Personal sign-up is local-only in this demo; accounts reset when the server restarts."
+      : "Hosted personal sign-up is disabled until durable account storage is configured.";
+    document.getElementById("personal-demo-entry").classList.toggle("hidden", !publicSignupEnabled);
     await refresh();
-    if (currentState.auth_required) document.getElementById("login-overlay").classList.add("hidden");
+    if (currentState.mode === "personal" || (currentState.auth_required && currentState.current_user)) {
+      document.getElementById("login-overlay").classList.add("hidden");
+    } else {
+      showLogin();
+    }
   } catch (error) {
     if (error.status === 401) showLogin();
     else showError(error);

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b1118">
   <title>Sanraksh — AI Security Gateway</title>
-  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/app.css?v=personal-metrics-layout-2">
 </head>
 <body>
   <div class="app-shell">
@@ -35,8 +35,9 @@
         <div class="topbar-right">
           <span class="environment"><i></i><span id="environment-label">LOCAL DEMO</span></span>
           <span class="model-pill"><span class="model-dot"></span><span id="model-label">Connecting…</span></span>
-          <div id="identity-picker" class="identity-picker hidden"><label for="identity-select">Acting as</label><select id="identity-select"></select></div>
+          <div id="identity-picker" class="identity-picker hidden"><label for="identity-select">Demo identity</label><select id="identity-select"></select></div>
           <div id="secure-identity" class="secure-identity hidden"></div>
+          <button id="workspace-switch-button" class="button button-quiet workspace-switch-button" type="button">Switch mode</button>
         </div>
       </header>
 
@@ -55,10 +56,10 @@
           <article class="stat-card"><div class="stat-top"><span>Requests inspected</span><span class="stat-icon icon-blue">↗</span></div><div id="stat-total" class="stat-value">0</div><div class="stat-foot"><span class="muted">All-time this session</span><span class="stat-trend">LIVE</span></div></article>
           <article class="stat-card"><div class="stat-top"><span>Requests blocked</span><span class="stat-icon icon-red">⊘</span></div><div id="stat-blocked" class="stat-value">0</div><div class="stat-foot"><span class="muted">Before reaching the model</span><span id="blocked-rate" class="stat-trend red-text">0%</span></div></article>
           <article class="stat-card"><div class="stat-top"><span>Sensitive items caught</span><span class="stat-icon icon-amber">⌕</span></div><div id="stat-findings" class="stat-value">0</div><div class="stat-foot"><span class="muted">PII, secrets &amp; injection</span><span class="stat-trend amber-text">PREVENTED</span></div></article>
-          <article class="stat-card"><div class="stat-top"><span>Authorized sources</span><span class="stat-icon icon-green">◈</span></div><div id="stat-docs" class="stat-value">—</div><div class="stat-foot"><span class="muted">Permission-filtered for you</span><span class="stat-trend green-text">ENFORCED</span></div></article>
+          <article id="stat-docs-card" class="stat-card"><div class="stat-top"><span>Authorized sources</span><span class="stat-icon icon-green">◈</span></div><div id="stat-docs" class="stat-value">—</div><div class="stat-foot"><span class="muted">Permission-filtered for you</span><span class="stat-trend green-text">ENFORCED</span></div></article>
         </section>
 
-        <section class="impact-panel" aria-labelledby="impact-title">
+        <section class="impact-panel" aria-labelledby="impact-title" data-professional-only>
           <div class="impact-heading">
             <div><div class="section-kicker">A 30-SECOND TABLETOP</div><h2 id="impact-title">One prompt. A real-world ripple.</h2><p>Explore how a small AI security gap could affect people, records, and public trust—and where the gateway can interrupt it.</p></div>
             <span class="impact-note"><span>✳</span> Awareness, not a prediction</span>
@@ -80,7 +81,7 @@
           </div>
         </section>
 
-        <section class="quick-game" aria-labelledby="game-title">
+        <section class="quick-game" aria-labelledby="game-title" data-professional-only>
           <div class="game-intro">
             <span class="game-mark" aria-hidden="true">✳</span>
             <div><div class="section-kicker">THE 30-SECOND SECURITY PAUSE</div><h2 id="game-title">Spot the safest move</h2><p>Three everyday AI moments. Pick what you would do—then see what the gateway checks.</p></div>
@@ -107,7 +108,14 @@
             <div class="scenario-row"><button class="scenario-chip" data-scenario="pii"><span class="scenario-icon amber-text">◇</span>Personal data</button><button class="scenario-chip" data-scenario="injection"><span class="scenario-icon red-text">⌁</span>Prompt injection</button><button class="scenario-chip" data-scenario="rag"><span class="scenario-icon blue-text">◈</span>Restricted document</button><button class="scenario-chip" data-scenario="indirect"><span class="scenario-icon violet-text">↳</span>Hidden in a document</button></div>
             <label class="field-label" for="prompt-input">YOUR MESSAGE <span>Inspected before model dispatch</span></label>
             <textarea id="prompt-input" rows="4" placeholder="Try a scenario above, or enter a prompt to inspect…"></textarea>
-            <div class="composer-footer"><span class="privacy-note"><span>⌑</span> Content is processed in memory only</span><button id="send-button" class="button button-primary">Inspect &amp; send <span>→</span></button></div>
+            <div class="private-attachment">
+              <input id="private-file-input" class="hidden" type="file" accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown">
+              <label class="private-file-button" for="private-file-input"><span aria-hidden="true">＋</span> Attach a private file</label>
+              <span id="private-file-name" class="private-file-name">PDF, DOCX, TXT or Markdown · up to 2 MB</span>
+              <button id="private-file-remove" class="private-file-remove hidden" type="button" aria-label="Remove attached file">×</button>
+              <p>Use Inspect &amp; send—direct uploads to ChatGPT bypass Sanraksh. Files are scanned first and never added to shared documents; approval holds may remain in server memory.</p>
+            </div>
+            <div class="composer-footer"><span id="privacy-note" class="privacy-note"><span>⌑</span> Content is not retained in gateway logs</span><button id="send-button" class="button button-primary">Inspect &amp; send <span>→</span></button></div>
             <div id="result-box" class="result-box hidden" aria-live="polite"></div>
             <div class="gateway-foot"><span><i class="status-led"></i> Prompt scan</span><span><i class="status-led"></i> Policy enforcement</span><span><i class="status-led"></i> Response scan</span></div>
           </section>
@@ -124,7 +132,7 @@
           </section>
         </div>
 
-        <section id="access" class="panel access-panel">
+        <section id="access" class="panel access-panel" data-professional-only>
           <div class="panel-heading"><div><div class="section-kicker">RETRIEVAL ACCESS CONTROL</div><h2>Knowledge, scoped to identity</h2><p>Every document is filtered on the server before it can reach an AI context.</p></div><div class="role-tag"><span class="role-dot"></span><span id="access-role">Analyst</span> access</div></div>
           <div class="access-layout">
             <div class="doc-list-wrap">
@@ -193,7 +201,7 @@
           <div id="approval-list" class="approval-list"></div>
         </section>
 
-        <section class="panel benchmark-panel">
+        <section class="panel benchmark-panel" data-professional-only>
           <div class="panel-heading"><div><div class="section-kicker">QUALITY CHECK</div><h2>Detection benchmark</h2><p>Repeatable test set of legitimate and adversarial prompts. Runs locally against live rules.</p></div><button id="benchmark-button" class="button button-secondary">Run benchmark <span>→</span></button></div>
           <div class="benchmark-content"><div class="benchmark-score"><div id="benchmark-accuracy">—</div><span>CASE ACCURACY</span></div><div class="benchmark-detail"><div id="benchmark-copy">No benchmark run yet. Test both detection and false positives before adjusting controls.</div><div class="bench-track"><div id="benchmark-progress"></div></div><div class="benchmark-legend"><span><i class="legend-green"></i> Correctly classified</span><span><i class="legend-red"></i> Misclassified</span><span id="benchmark-count">67 synthetic prompts · includes stress cases</span></div></div></div>
           <div id="benchmark-breakdown" class="benchmark-breakdown hidden"></div>
@@ -209,7 +217,84 @@
       </div>
     </main>
   </div>
-  <div id="login-overlay" class="login-overlay hidden"><form id="login-form" class="login-card"><img class="login-brand" src="/assets/sanraksh-logo-trim.png" alt="Sanraksh AI Security Gateway"><div class="section-kicker">SECURE WORKSPACE</div><h2>Sign in to your gateway</h2><p>Use an account configured by your deployment administrator.</p><label for="login-user">Username</label><input id="login-user" autocomplete="username" required><label for="login-password">Password</label><input id="login-password" type="password" autocomplete="current-password" required><div id="login-error" class="login-error"></div><button class="button button-primary" type="submit">Sign in <span>→</span></button><small>Hosted accounts are authenticated by the gateway server.</small></form></div>
+  <div id="login-overlay" class="login-overlay hidden">
+    <section id="workspace-choice" class="login-card">
+      <img class="login-brand" src="/assets/sanraksh-logo-trim.png" alt="Sanraksh AI Security Gateway">
+      <div class="section-kicker">CHOOSE YOUR WORKSPACE</div><h2>How will you use Sanraksh?</h2>
+      <p>Choose the protected experience that matches your needs.</p>
+      <button id="private-mode-button" class="mode-choice" type="button"><span class="mode-choice-icon">▣</span><span><strong>Private · Professional</strong><small>For an organization workspace with role-based document access and managed policies.</small></span><b>→</b></button>
+      <button id="public-mode-button" class="mode-choice" type="button"><span class="mode-choice-icon">◉</span><span><strong>Public · Personal</strong><small>A private personal account for individuals protecting their own prompts and files.</small></span><b>→</b></button>
+      <p id="public-mode-status" class="mode-status" role="status"></p>
+      <small>Personal accounts are currently available in the local demo only. Hosted sign-up will be enabled after durable account storage is configured.</small>
+    </section>
+    <form id="login-form" class="login-card hidden">
+      <button class="login-back" data-back-to-modes type="button">← Choose a workspace</button>
+      <img class="login-brand centered-login-brand" src="/assets/sanraksh-logo-trim.png" alt="Sanraksh AI Security Gateway">
+      <div class="professional-login-heading"><div class="section-kicker">PRIVATE · PROFESSIONAL</div><span class="workspace-security-badge"><i></i> ORGANIZATION WORKSPACE</span></div>
+      <h2>Sign in to your workspace</h2><p>Use the organization account provided by your workspace administrator.</p>
+      <label for="login-user">Organization username</label><input id="login-user" autocomplete="username" required>
+      <label for="login-password">Password</label><input id="login-password" type="password" autocomplete="current-password" required>
+      <div id="login-error" class="login-error"></div><button class="button button-primary" type="submit">Sign in <span>→</span></button>
+      <div class="workspace-login-assurance"><span aria-hidden="true">⌑</span><p><strong>Protected workspace access</strong><small>Your organization manages account access and document permissions.</small></p></div>
+      <small>Need access? Contact your organization administrator.</small>
+    </form>
+    <section id="professional-demo-card" class="login-card hidden">
+      <button class="login-back" data-back-to-modes type="button">← Choose a workspace</button>
+      <img class="login-brand centered-login-brand" src="/assets/sanraksh-logo-trim.png" alt="Sanraksh AI Security Gateway">
+      <div class="professional-login-heading"><div class="section-kicker">PRIVATE · PROFESSIONAL DEMO</div><span class="workspace-security-badge demo-badge"><i></i> SANDBOX</span></div>
+      <h2 id="professional-demo-title">Organization access</h2>
+      <p id="professional-demo-description">Sign in with your existing workspace account, create a local demo account, or preview a fictional role.</p>
+      <div id="professional-hosted-note" class="workspace-login-assurance hidden"><span aria-hidden="true">⌑</span><p><strong>Organization-managed access</strong><small>Hosted accounts and roles are provisioned by your workspace administrator.</small></p></div>
+      <div id="professional-demo-tabs" class="account-tabs">
+        <button id="professional-signin-tab" class="account-tab selected" type="button">Sign in</button>
+        <button id="professional-register-tab" class="account-tab" type="button">Create account</button>
+        <button id="professional-identity-tab" class="account-tab" type="button">Demo identity</button>
+      </div>
+      <form id="professional-demo-login-form">
+        <label for="professional-login-email">Work email</label><input id="professional-login-email" type="email" autocomplete="username" required>
+        <label for="professional-login-password">Password</label><input id="professional-login-password" type="password" autocomplete="current-password" required>
+        <div id="professional-login-error" class="login-error"></div>
+        <button id="professional-login-button" class="button button-primary" type="submit">Sign in to workspace <span>→</span></button>
+      </form>
+      <form id="professional-demo-register-form" class="hidden">
+        <label for="professional-register-name">Full name</label><input id="professional-register-name" autocomplete="name" maxlength="80" required>
+        <label for="professional-register-email">Work email</label><input id="professional-register-email" type="email" autocomplete="email" required>
+        <label for="professional-register-role">Demo role</label><select id="professional-register-role" class="demo-account-select"><option value="analyst">Analyst</option><option value="manager">Manager</option><option value="admin">Admin</option></select>
+        <label for="professional-register-password">Password <small>At least 12 characters</small></label><input id="professional-register-password" type="password" autocomplete="new-password" minlength="12" required>
+        <div id="professional-register-error" class="login-error"></div>
+        <button class="button button-primary" type="submit">Create demo account <span>→</span></button>
+        <small>Local demo only. New accounts are temporary and do not grant real organization access.</small>
+      </form>
+      <div id="professional-demo-identity-panel" class="hidden">
+        <label for="professional-demo-identity">Choose a fictional role</label><select id="professional-demo-identity" class="demo-account-select"></select>
+        <div id="professional-demo-error" class="login-error"></div>
+        <button id="professional-demo-enter" class="button button-primary" type="button">Continue to demo <span>→</span></button>
+        <div class="workspace-login-assurance"><span aria-hidden="true">◈</span><p><strong>Role-based preview</strong><small>See how permissions change across organization roles.</small></p></div>
+      </div>
+      <small id="professional-hosted-footnote">For real organization access, use the hosted workspace sign-in.</small>
+    </section>
+    <section id="personal-account-card" class="login-card hidden">
+      <button class="login-back" data-back-to-modes type="button">← Choose a workspace</button>
+      <img class="login-brand centered-login-brand" src="/assets/sanraksh-logo-trim.png" alt="Sanraksh AI Security Gateway">
+      <div class="section-kicker">PUBLIC · PERSONAL</div><h2 id="personal-account-title">Your personal protection</h2>
+      <div class="account-tabs"><button id="personal-signin-tab" class="account-tab selected" type="button">Sign in</button><button id="personal-register-tab" class="account-tab" type="button">Create account</button></div>
+      <form id="personal-login-form">
+        <label for="personal-login-email">Email</label><input id="personal-login-email" type="email" autocomplete="email" required>
+        <label for="personal-login-password">Password</label><input id="personal-login-password" type="password" autocomplete="current-password" required>
+        <div id="personal-login-error" class="login-error"></div><button class="button button-primary" type="submit">Sign in <span>→</span></button>
+      </form>
+      <div id="personal-demo-entry" class="personal-demo-entry">
+        <span>Just exploring?</span><button id="personal-demo-login" class="button button-secondary" type="button">Sign in with demo account <span>→</span></button>
+      </div>
+      <form id="personal-register-form" class="hidden">
+        <label for="personal-register-name">Name</label><input id="personal-register-name" autocomplete="name" maxlength="80" required>
+        <label for="personal-register-email">Email</label><input id="personal-register-email" type="email" autocomplete="email" required>
+        <label for="personal-register-password">Password <small>At least 12 characters</small></label><input id="personal-register-password" type="password" autocomplete="new-password" minlength="12" required>
+        <div id="personal-register-error" class="login-error"></div><button class="button button-primary" type="submit">Create personal account <span>→</span></button>
+      </form>
+      <small>Local demo only: accounts, settings, and audit metadata are held in server memory and reset when the server restarts. Do not use real credentials or sensitive documents.</small>
+    </section>
+  </div>
   <script src="/app.js" defer></script>
 </body>
 </html>
